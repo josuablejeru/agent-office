@@ -198,3 +198,62 @@ def test_memory_operations_are_always_allowed() -> None:
     for operation in ("memory.remember", "memory.recall", "memory.forget"):
         assert classify(operation, {}).action == ALLOW
     assert classify("db.sql", {"sql": 5}).action is None
+
+
+# --- bypasses found in review -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(rm -rf ~/Shared)"', 'echo "`rm -rf ~`"', "cat <(rm -rf ~)", "ls;(rm -rf ~)",
+        "(ls);rm -rf ~", "ls;</dev/null rm -rf ~", 'bash -lc "rm -rf ~"', "sudo --user root rm -rf /",
+        "sudo --user=root rm -rf /", "timeout -s KILL 5 rm -rf ~", "timeout --signal=KILL 5 rm -rf ~",
+        'eval "rm -rf ~"', "sudo find / -fprint /etc/shadow", "sort -o /etc/passwd /dev/null",
+        "sort --output=/etc/passwd x", "nice -n 5 rm -rf ~", "ls 2>/dev/null; rm -rf ~",
+        "sudo -u root -- rm -rf /srv",
+    ],
+)
+def test_hidden_destructive_commands_still_need_approval(command: str) -> None:
+    assert classify_shell(command).action == APPROVAL, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "LD_PRELOAD=/tmp/x.so ls", 'echo "$(date)"', "ls `pwd`", "find . -fprint out.txt",
+        "sort -o sorted.txt names.txt", "uniq in.txt out.txt", "tree -o out.txt", "less notes.txt",
+        "env", "bash -c 'ls'", "cat <(ls)",
+    ],
+)
+def test_lines_that_could_do_more_than_read_are_not_called_read_only(command: str) -> None:
+    assert classify_shell(command).action is None, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["ls; pwd", "(ls)", "ls 2>/dev/null", "cat < notes.txt", "sort names.txt | uniq -c", "find . -name x -print"],
+)
+def test_plain_read_only_lines_are_still_allowed(command: str) -> None:
+    assert classify_shell(command).action == ALLOW, command
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH a AS (SELECT '/*') DELETE FROM t --*/'",
+        "WITH a AS (SELECT '/*') UPDATE t SET x=0 --*/'",
+        "SELECT '--' ; DROP TABLE t",
+        "DELETE FROM t WHERE 1", "DELETE FROM t WHERE 1=1", "UPDATE t SET a=1 WHERE true",
+        "delete from t /* where id = 1 */",
+    ],
+)
+def test_sql_cannot_hide_a_wipe_behind_quotes_or_comments(sql: str) -> None:
+    assert classify("db.sql", {"sql": sql}).action == APPROVAL, sql
+
+
+def test_comment_markers_inside_strings_do_not_confuse_read_only_sql() -> None:
+    for sql in ("SELECT '/* not a comment' AS x", "SELECT '--' AS dashes, name FROM t", 'SELECT "a--b" FROM t'):
+        assert classify("db.sql", {"sql": sql}).action == ALLOW, sql
+    assert classify("db.sql", {"sql": "DELETE FROM t WHERE id = 1"}).action is None
+    assert classify("db.sql", {"sql": "UPDATE t SET a = 1 WHERE name = '1'"}).action is None
