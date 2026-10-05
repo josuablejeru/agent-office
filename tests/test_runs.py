@@ -671,3 +671,80 @@ def test_a_slow_memory_cannot_hold_a_task_up(tmp_path: Path, monkeypatch: pytest
     assert asyncio.run(scenario()) < 2
     with Session(engine) as session:
         assert session.exec(select(Run)).one().status == "completed"
+
+
+def test_notifier_hears_about_approvals_and_finished_runs(tmp_path: Path) -> None:
+    from backend.notify import Notifier
+
+    class Recorder(Notifier):
+        def __init__(self) -> None:
+            self.events: list[Any] = []
+
+        def attention_changed(self, waiting: int) -> None:
+            self.events.append(("waiting", waiting))
+
+        def run_ended(self, agent_name: str, succeeded: bool) -> None:
+            self.events.append(("ended", agent_name, succeeded))
+
+    provider = ScriptedProvider(
+        ModelResponse(tool_calls=[call(command="rm -rf ~/old")]), ModelResponse(text="Removed.")
+    )
+    service, engine, agent_id = make_service(tmp_path, provider)
+    service.notifier = recorder = Recorder()
+    broker: ApprovalBroker = service._approvals  # noqa: SLF001
+
+    async def scenario() -> None:
+        service.start(agent_id, "clean up")
+        for _ in range(100):
+            if recorder.events:
+                break
+            await asyncio.sleep(0.02)
+        assert recorder.events == [("waiting", 1)]
+        with Session(engine) as session:
+            approval = session.exec(select(Approval)).one()
+        assert approval.id is not None and broker.resolve(approval.id, True)
+        await service.wait(agent_id)
+
+    asyncio.run(scenario())
+    assert recorder.events == [("waiting", 1), ("waiting", 0), ("ended", "a1", True)]
+
+
+def test_notifier_is_told_of_failures_but_not_of_user_cancellations(tmp_path: Path) -> None:
+    from backend.notify import Notifier
+
+    class Recorder(Notifier):
+        def __init__(self) -> None:
+            self.events: list[Any] = []
+
+        def attention_changed(self, waiting: int) -> None:
+            self.events.append(("waiting", waiting))
+
+        def run_ended(self, agent_name: str, succeeded: bool) -> None:
+            self.events.append(("ended", agent_name, succeeded))
+
+    class Down(ModelProvider):
+        async def chat(self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None) -> ModelResponse:
+            raise ProviderError("unreachable")
+
+    service, _, agent_id = make_service(tmp_path / "a", Down())
+    service.notifier = failed = Recorder()
+
+    async def fail() -> None:
+        service.start(agent_id, "hi")
+        await service.wait(agent_id)
+
+    (tmp_path / "a").mkdir(exist_ok=True)
+    asyncio.run(fail())
+    assert failed.events == [("ended", "a1", False)]
+
+    waiting_provider = ScriptedProvider(ModelResponse(tool_calls=[call(command="rm -rf ~/x")]))
+    service, _, agent_id = make_service(tmp_path / "b", waiting_provider)
+    service.notifier = cancelled = Recorder()
+
+    async def cancel() -> None:
+        service.start(agent_id, "clean")
+        await asyncio.sleep(0.2)
+        await service.cancel(agent_id)
+
+    asyncio.run(cancel())
+    assert cancelled.events == [("waiting", 1), ("waiting", 0)]  # badge cleared, no "finished" ping

@@ -22,6 +22,7 @@ from backend.agents.tools import ENVIRONMENT_NOTE, GuestToolExecutor, HostHandle
 from backend.config import ProviderSettings, Settings
 from backend.db.models import Agent, Approval, ChannelMessage, Message, Run, ToolCall, utcnow
 from backend.logging_config import get_logger
+from backend.notify import Notifier
 from backend.policy.actions import PolicyDecision
 from backend.policy.approvals import ApprovalBroker
 from backend.policy.engine import PolicyEngine
@@ -61,7 +62,9 @@ class DatabaseObserver:
         run_id: int,
         approvals: ApprovalBroker,
         may_act: asyncio.Event,
+        on_waiting: Callable[[bool], None] = lambda waiting: None,
     ) -> None:
+        self._on_waiting = on_waiting
         self._session = session
         self._run_id = run_id
         self._approvals = approvals
@@ -87,7 +90,11 @@ class DatabaseObserver:
             "approval requested",
             extra={"run": self._run_id, "approval": approval.id, "risk": decision.risk},
         )
-        approved = await self._approvals.wait(approval.id)
+        self._on_waiting(True)
+        try:
+            approved = await self._approvals.wait(approval.id)
+        finally:
+            self._on_waiting(False)
         approval.status = "approved" if approved else "rejected"
         approval.resolved_at = utcnow()
         self._session.add(approval)
@@ -129,7 +136,11 @@ class RunService:
         provider_factory: ProviderFactory = build_provider,
         client_factory: ClientFactory = GuestClient,
         channels: ChannelService | None = None,
+        notifier: Notifier | None = None,
     ) -> None:
+        self.notifier = notifier or Notifier()
+        # Agents currently paused for the user's approval.
+        self._waiting: set[int] = set()
         self._channels = channels or ChannelService(engine)
         self._engine = engine
         self._settings = settings
@@ -398,7 +409,13 @@ class RunService:
                     executor,
                     evaluate,
                     RunLimits.model_validate(self._settings.load_config().get("limits") or {}),
-                    DatabaseObserver(session, run_id, self._approvals, self._gate(agent.id)),
+                    DatabaseObserver(
+                        session,
+                        run_id,
+                        self._approvals,
+                        self._gate(agent.id),
+                        on_waiting=lambda waiting, agent_id=agent.id: self._set_waiting(agent_id, waiting),
+                    ),
                 )
             except asyncio.CancelledError:
                 self._finish(session, run, agent, "cancelled", error="Stopped by the user.")
@@ -423,6 +440,12 @@ class RunService:
                 self._channels.post(
                     run.channel_id, SYSTEM_AUTHOR, f"@{agent.name} could not answer: {run.error}"
                 )
+
+    def _set_waiting(self, agent_id: int, waiting: bool) -> None:
+        before = len(self._waiting)
+        (self._waiting.add if waiting else self._waiting.discard)(agent_id)
+        if len(self._waiting) != before:
+            self.notifier.attention_changed(len(self._waiting))
 
     def _finish(
         self,
@@ -458,6 +481,8 @@ class RunService:
         session.add(run)
         session.commit()
         log.info("run finished", extra={"run": run.id, "agent": agent.name, "status": status})
+        if status != "cancelled":  # the user stopped it themselves: nothing to tell them
+            self.notifier.run_ended(agent.name, status == "completed")
 
 
 def format_recall(context: dict[str, Any]) -> str:

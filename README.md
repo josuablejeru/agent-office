@@ -88,7 +88,8 @@ found again on the next start.
    records; the panel shows their tables and row counts.
 6. **Approvals.** A destructive action pauses the run and shows the exact
    command, the risk and the reason. The sidebar marks agents that are waiting
-   for you.
+   for you, the Dock icon shows how many are waiting, and it bounces if the
+   app is in the background. It bounces once when a task finishes.
 7. **Open computer.** Watch the agent's desktop. **Take control** gives you
    mouse and keyboard and pauses the agent, for logins, 2FA and CAPTCHAs.
 8. **Channels.** A channel is a room everyone in the office can read. Write

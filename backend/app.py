@@ -23,6 +23,7 @@ from backend.config import Settings
 from backend.instance import is_running
 from backend.logging_config import get_logger
 from backend.main import create_app
+from backend.notify import Notifier
 from backend.vm.ports import LOOPBACK
 
 log = get_logger("app")
@@ -70,6 +71,45 @@ def brand_process() -> None:
         log.info("could not set the Dock name and icon")
 
 
+class DockNotifier(Notifier):
+    """Shows waiting approvals as a Dock badge and bounces the icon when the app is in the background."""
+
+    def __init__(self) -> None:
+        self._waiting = 0
+
+    @staticmethod
+    def _on_main_thread(work: Any) -> None:
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(work)
+
+    def attention_changed(self, waiting: int) -> None:
+        increased, self._waiting = waiting > self._waiting, waiting
+
+        def update() -> None:
+            from AppKit import NSApplication, NSCriticalRequest
+
+            app = NSApplication.sharedApplication()
+            app.dockTile().setBadgeLabel_(str(waiting) if waiting else None)
+            # Read back from the Dock tile, so the log shows what macOS is displaying.
+            log.info("dock badge", extra={"label": app.dockTile().badgeLabel() or ""})
+            if increased and not app.isActive():
+                # Keeps bouncing until the app is brought forward: an agent is blocked on the user.
+                app.requestUserAttention_(NSCriticalRequest)
+
+        self._on_main_thread(update)
+
+    def run_ended(self, agent_name: str, succeeded: bool) -> None:
+        def update() -> None:
+            from AppKit import NSApplication, NSInformationalRequest
+
+            app = NSApplication.sharedApplication()
+            if not app.isActive():
+                app.requestUserAttention_(NSInformationalRequest)  # one bounce
+
+        self._on_main_thread(update)
+
+
 def on_window_ready(window: Any) -> None:
     """Runs once the window exists: brand the process and record whether the UI came up."""
     brand_process()
@@ -96,6 +136,7 @@ def main() -> int:
         print(f"Another backend is already using {settings.home}.", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
     app = create_app(settings, ui_dir=ui_dir)
+    app.state.run_service.notifier = DockNotifier()
     port = pick_port()
     server = uvicorn.Server(uvicorn.Config(app, host=LOOPBACK, port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, name="backend", daemon=True)

@@ -76,6 +76,12 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [authorized, refresh]);
 
+  // The same signal as the Dock badge, for when the UI runs in a browser tab.
+  const waiting = agents.filter((agent) => agent.activity === "needs_approval").length;
+  useEffect(() => {
+    document.title = waiting > 0 ? `(${waiting}) Agent Office` : "Agent Office";
+  }, [waiting]);
+
   if (authorized === false) return <TokenPrompt onSubmit={connect} />;
 
   const selectedAgent = view?.kind === "agent" ? agents.find((a) => a.id === view.id) : undefined;
