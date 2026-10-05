@@ -164,6 +164,37 @@ count):
       max_runtime_seconds: 900
       max_repeated_identical_calls: 3
 
+## Working behind a VPN
+
+An agent's computer reaches the network through this Mac, so anything the Mac
+can reach, including hosts behind a VPN, the agent can reach too.
+
+Names need one more step. A VPN usually tells macOS "ask our servers about
+`corp.example`" (split DNS), and a VM would not learn that. The app therefore
+runs a small DNS forwarder on the Mac: each agent's computer sends its lookups
+there, and every lookup is passed to whichever server macOS would use for that
+name. It follows the Mac live, so connecting or disconnecting the VPN takes
+effect without restarting anything. Settings shows the internal domains
+currently in effect.
+
+- Extra rules, if your VPN client does not register its domains with macOS:
+
+      network:
+        dns_rules:
+          corp.example: ["10.20.0.53"]
+
+- `network.split_dns: false` turns the forwarder off; agents then use basic
+  DNS and internal names will not resolve.
+- An agent's computer picks the forwarder up when it is turned on, and its
+  lookups depend on the app running.
+- **Signing in is separate.** The agent's Chrome has none of your sessions or
+  certificates. Use Take control to log in once; tools that require a
+  company-managed device or a client certificate will refuse it.
+- **Mind what you connect.** An agent that can reach internal tools can be
+  steered to them by a web page it reads, and what it reads is sent to its
+  model provider. For work use, consider `policy.default_action:
+  require_approval`.
+
 ## Policy
 
 Every tool call passes the policy engine (`backend/policy/`) before it runs.
@@ -236,6 +267,7 @@ To uninstall: delete `/Applications/Agent Office.app`,
 | A website shows the agent a CAPTCHA | Open computer, Take control, pass the check, Return control. Agents are told not to try themselves. |
 | An agent does not answer in a channel | Its computer must be on, and it must not be busy with another task |
 | A model server on your network works from Terminal but not from the app | System Settings › Privacy & Security › Local Network: allow Agent Office. macOS may ask again after the app is rebuilt. |
+| An internal hostname does not resolve on an agent's computer | Settings › Network should list the domain while the VPN is connected. If not, add it under `network.dns_rules`. Turn the agent's computer off and on once after updating the app. |
 | The app says it is already running | Quit the other copy, or a `start-dev.sh` session |
 
 API reference: run from source and open http://127.0.0.1:8000/docs.

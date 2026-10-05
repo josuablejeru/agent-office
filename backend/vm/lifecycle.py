@@ -13,6 +13,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from backend.config import Settings
 from backend.db.models import Agent
@@ -40,6 +41,8 @@ CONSOLE_LOG_KEEP_BYTES = 1024**2
 STALLED_STATES = {"paused", "io-error", "internal-error", "guest-panicked"}
 SNAPSHOT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
+# Asked at every VM start: how the guest reaches the host's DNS forwarder, if it runs.
+DnsSettings = Callable[[], Awaitable[dict[str, Any] | None]]
 CommandLookup = Callable[[int], Awaitable[str | None]]
 Detector = Callable[[], Awaitable[Capabilities]]
 
@@ -119,7 +122,9 @@ class QemuVMManager(VMManager):
         command_lookup: CommandLookup = process_command,
         detect: Detector = detect_capabilities,
         shutdown_timeout: float = 60.0,
+        dns_settings: DnsSettings | None = None,
     ) -> None:
+        self.dns_settings = dns_settings
         self._settings = settings
         self._command_lookup = command_lookup
         self._detect = detect
@@ -245,7 +250,8 @@ class QemuVMManager(VMManager):
         trim_log(self.console_log(agent))
         # Rebuilt on every start so the guest always runs the current daemon code.
         seed = self.seed_iso(agent)
-        await build_seed_iso(seed, agent.name, self.guest_secret(agent))
+        dns = await self.dns_settings() if self.dns_settings else None
+        await build_seed_iso(seed, agent.name, self.guest_secret(agent), dns=dns)
 
         spec = VMSpec(
             name=agent.name,

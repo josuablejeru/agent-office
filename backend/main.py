@@ -30,6 +30,7 @@ from backend.db.database import create_db_engine, init_db
 from backend.instance import acquire_instance_lock
 from backend.keystore import KeyStore
 from backend.logging_config import configure_logging, get_logger
+from backend.net.dns import DnsForwarder
 from backend.policy.approvals import ApprovalBroker
 from backend.policy.setup import build_policy_engine
 from backend.providers.base import ModelProvider
@@ -57,10 +58,15 @@ async def recover_vm_states(app: FastAPI) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Held until the process exits: a second backend on this directory must not start.
     app.state.instance_lock = acquire_instance_lock(app.state.settings)
+    if app.state.dns is not None:
+        await app.state.dns.start()
+        app.state.vm_manager.dns_settings = app.state.dns.guest_settings
     await recover_vm_states(app)
     app.state.run_service.mark_interrupted()
     app.state.channels.ensure_default()
     yield
+    if app.state.dns is not None:
+        app.state.dns.stop()
     app.state.instance_lock.close()
     # VMs are deliberately left running here: they are persistent computers and
     # the backend finds them again on its next start. The desktop app powers
@@ -89,6 +95,12 @@ def create_app(
     app.state.engine = engine
     app.state.api_token = settings.load_api_token()
     app.state.vm_manager = QemuVMManager(settings)
+    network = settings.load_config().get("network") or {}
+    app.state.dns = (
+        DnsForwarder(int(network.get("dns_port", 47653)), network.get("dns_rules") or {})
+        if network.get("split_dns", True)
+        else None
+    )
     app.state.key_store = key_store
     app.state.base_image_builder = BaseImageBuilder(settings)
     app.state.approvals = ApprovalBroker()

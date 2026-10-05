@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { ModelTest } from "./ModelTest";
-import type { Provider } from "./types";
+import type { DnsStatus, Provider } from "./types";
 
 interface Props {
   providers: Provider[];
@@ -171,11 +171,16 @@ function AddProvider({ onChanged }: { onChanged: () => Promise<void> }) {
 
 export function SettingsModal({ providers, onClose, onChanged }: Props) {
   const [keepRunning, setKeepRunning] = useState<boolean | null>(null);
+  const [dns, setDns] = useState<DnsStatus | null>(null);
 
   useEffect(() => {
     void api
       .getSettings()
       .then((settings) => setKeepRunning(settings.keep_vms_running_on_quit))
+      .catch(() => undefined);
+    void api
+      .dnsStatus()
+      .then(setDns)
       .catch(() => undefined);
   }, []);
 
@@ -202,6 +207,27 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
           Off: quitting shuts every agent&apos;s computer down cleanly (nothing is lost). On: they keep
           running in the background and use memory until you stop them.
         </p>
+
+        <h3>Network</h3>
+        {dns?.active ? (
+          <>
+            <p className="hint">
+              Agents look up names the way this Mac does, including domains a VPN adds. Read live from
+              this Mac{Object.keys(dns.rules).length === 0 && ": no internal domains are set up right now"}.
+            </p>
+            {Object.entries(dns.rules).map(([domain, servers]) => (
+              <div key={domain} className="dns-rule">
+                <code>{domain}</code>
+                <span className="muted">answered by {servers.join(", ")}</span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <p className="hint">
+            Agents use their own basic name lookup; names that only resolve through a VPN will not
+            work on their computers.
+          </p>
+        )}
 
         <h3>Model providers</h3>
         <p className="hint">

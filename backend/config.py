@@ -39,6 +39,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "vertex": {"type": "vertex", "project": "", "region": "global"},
         "vertex-claude": {"type": "vertex-anthropic", "project": "", "region": "global"},
     },
+    "network": {
+        # Give agents this Mac's view of DNS, including domains a VPN adds.
+        "split_dns": True,
+        "dns_port": 47653,
+        # Extra rules, e.g. {"corp.example": ["10.1.2.3"]}; these win over the system's.
+        "dns_rules": {},
+    },
     "app": {
         # The desktop app powers agent VMs off when it quits unless this is true.
         "keep_vms_running_on_quit": False,

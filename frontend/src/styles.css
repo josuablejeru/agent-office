@@ -1217,3 +1217,10 @@ textarea:focus {
 .agent-actions {
   flex-wrap: wrap;
 }
+
+.dns-rule {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 0.86rem;
+}

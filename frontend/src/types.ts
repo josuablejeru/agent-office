@@ -52,6 +52,13 @@ export interface Provider {
   credentials_found: boolean;
 }
 
+export interface DnsStatus {
+  active: boolean;
+  default_servers: string[];
+  rules: Record<string, string[]>;
+  search_domains: string[];
+}
+
 export interface AppSettings {
   keep_vms_running_on_quit: boolean;
 }

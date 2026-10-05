@@ -7,8 +7,10 @@ truth for both.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -28,8 +30,21 @@ def render_meta_data(agent_name: str) -> str:
     )
 
 
-def stage_seed(staging: Path, agent_name: str, secret: str, guest_source: Path) -> None:
-    """Lay out the seed disk contents in `staging`."""
+HOST_DNS_FILENAME = "host_dns.json"
+
+
+def stage_seed(
+    staging: Path,
+    agent_name: str,
+    secret: str,
+    guest_source: Path,
+    dns: dict[str, Any] | None = None,
+) -> None:
+    """Lay out the seed disk contents in `staging`.
+
+    `dns` tells the guest how to reach the host's DNS forwarder; without it the
+    guest keeps (or returns to) its ordinary DNS.
+    """
     staging.mkdir(parents=True)
     (staging / "meta-data").write_text(render_meta_data(agent_name))
     (staging / "user-data").write_text("#cloud-config\n{}\n")
@@ -38,16 +53,22 @@ def stage_seed(staging: Path, agent_name: str, secret: str, guest_source: Path) 
     guest_dir.mkdir()
     for source in sorted(guest_source.glob("*.py")):
         shutil.copyfile(source, guest_dir / source.name)
+    if dns is not None:
+        (guest_dir / HOST_DNS_FILENAME).write_text(json.dumps(dns))
 
 
 async def build_seed_iso(
-    iso_path: Path, agent_name: str, secret: str, guest_source: Path = GUEST_SOURCE_DIR
+    iso_path: Path,
+    agent_name: str,
+    secret: str,
+    guest_source: Path = GUEST_SOURCE_DIR,
+    dns: dict[str, Any] | None = None,
 ) -> None:
     """Write the seed ISO. macOS ships hdiutil, so no extra tooling is required."""
     staging = iso_path.parent / "seed"
     shutil.rmtree(staging, ignore_errors=True)
     try:
-        stage_seed(staging, agent_name, secret, guest_source)
+        stage_seed(staging, agent_name, secret, guest_source, dns)
         iso_path.unlink(missing_ok=True)
         await run_checked(
             "hdiutil", "makehybrid", "-iso", "-joliet",

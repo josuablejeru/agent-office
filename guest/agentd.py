@@ -24,6 +24,7 @@ from guest.browser import Browser
 from guest.database import db_list, db_sql
 from guest.files import file_list, file_read, file_write
 from guest.memory import memory_context, memory_forget, memory_recall, memory_remember
+from guest.network import configure_dns
 from guest.shared import (
     ensure_shared_dir,
     shared_finish,
@@ -143,6 +144,7 @@ def main() -> None:
     if not secret:
         raise SystemExit(f"{secret_path} is empty; refusing to start without a secret")
     ensure_shared_dir()
+    configure_dns()
     # Reachable only through QEMU's host-loopback port forward.
     host = os.environ.get("AGENTD_HOST", "0.0.0.0")
     port = int(os.environ.get("AGENTD_PORT", DEFAULT_PORT))

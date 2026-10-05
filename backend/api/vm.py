@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from backend.agents.manager import AgentManager, AgentNotFound
@@ -167,6 +167,29 @@ async def set_provider_location(name: str, payload: ProviderLocation, settings: 
     settings.update_user_config(["providers", name, "type"], provider.type)
     settings.update_user_config(["providers", name, "project"], payload.project)
     settings.update_user_config(["providers", name, "region"], payload.region)
+
+
+class DnsStatus(BaseModel):
+    # Whether agents get this Mac's view of DNS.
+    active: bool
+    default_servers: list[str]
+    rules: dict[str, list[str]]
+    search_domains: list[str]
+
+
+@router.get("/system/dns")
+async def dns_status(request: Request) -> DnsStatus:
+    """How agents' computers resolve names, for the Settings dialog."""
+    forwarder = request.app.state.dns
+    if forwarder is None or not forwarder.running:
+        return DnsStatus(active=False, default_servers=[], rules={}, search_domains=[])
+    view = await forwarder.view()
+    return DnsStatus(
+        active=True,
+        default_servers=[address for address, _ in view.default_servers],
+        rules={rule.domain: [address for address, _ in rule.servers] for rule in view.rules},
+        search_domains=view.search_domains,
+    )
 
 
 @router.get("/settings")

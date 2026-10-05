@@ -4,6 +4,7 @@ import type {
   BaseImageStatus,
   Channel,
   ChannelMessage,
+  DnsStatus,
   MemoryView,
   ModelCheck,
   ModelStatus,
@@ -134,6 +135,7 @@ export const api = {
     request<ChannelMessage[]>(`/api/channels/${id}/messages?after=${after}`),
   postToChannel: (id: number, content: string) =>
     request<ChannelMessage>(`/api/channels/${id}/messages`, post({ content })),
+  dnsStatus: () => request<DnsStatus>("/api/system/dns"),
   getSettings: () => request<AppSettings>("/api/settings"),
   setSettings: (settings: AppSettings) =>
     request<AppSettings>("/api/settings", { method: "PUT", body: JSON.stringify(settings) }),
