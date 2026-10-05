@@ -5,13 +5,15 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 
 from backend.agents.manager import AgentNotFound
@@ -19,7 +21,14 @@ from backend.api.deps import AgentManagerDep, VMManagerDep
 from backend.logging_config import get_logger
 from backend.vm.guest import GuestClient
 from backend.vm.lifecycle import VMStatus
-from backend.vm.transfer import MAX_FILE_BYTES, TransferError, download, list_files, upload
+from backend.vm.transfer import (
+    MAX_FILE_BYTES,
+    UNEXPECTED_REPLY,
+    TransferError,
+    download,
+    list_files,
+    upload,
+)
 
 log = get_logger("files")
 
@@ -65,6 +74,24 @@ def free_path(directory: Path, name: str) -> Path:
     return candidate
 
 
+def quarantine(path: Path) -> None:
+    """Mark a file as downloaded, as a browser would.
+
+    The file's name and content come from the agent's computer. With this mark,
+    macOS asks before opening it if it is something that can run.
+    """
+    stamp = f"0081;{int(time.time()):x};Agent Office;"
+    try:
+        subprocess.run(
+            ["/usr/bin/xattr", "-w", "com.apple.quarantine", stamp, str(path)],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        log.warning("could not mark a saved file as downloaded")
+
+
 @router.get("/files")
 async def get_files(agent_id: int, manager: AgentManagerDep, vms: VMManagerDep) -> list[SharedFile]:
     client = await _client(agent_id, manager, vms)
@@ -72,6 +99,8 @@ async def get_files(agent_id: int, manager: AgentManagerDep, vms: VMManagerDep) 
         return [SharedFile.model_validate(entry) for entry in await list_files(client)]
     except TransferError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, UNEXPECTED_REPLY) from exc
 
 
 @router.put("/files/{name}")
@@ -107,6 +136,9 @@ async def _fetch(agent_id: int, path: str, manager: AgentManagerDep, vms: VMMana
         Path(temporary).unlink(missing_ok=True)
         code = status.HTTP_404_NOT_FOUND if "no such file" in str(exc) else status.HTTP_409_CONFLICT
         raise HTTPException(code, str(exc)) from exc
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)  # never leave a partial download behind
+        raise
     return Path(temporary)
 
 
@@ -135,5 +167,6 @@ async def save_file(
     destination = free_path(DOWNLOADS_DIR, Path(payload.path).name)
     shutil.move(str(temporary), destination)
     destination.chmod(0o644)  # temp files are private; a download should be an ordinary file
+    quarantine(destination)
     log.info("file saved to downloads", extra={"agent": agent_id})
     return Saved(saved_to=str(destination))

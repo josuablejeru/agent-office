@@ -575,3 +575,13 @@ def test_memory_api_needs_the_computer_on(app_client: Any) -> None:
     assert client.delete(f"/api/agents/{agent_id}/memory/1").status_code == 409
     assert client.post(f"/api/agents/{agent_id}/memory", json={"subject": ""}).status_code == 422
     assert client.get("/api/agents/999/memory").status_code == 404
+
+
+def test_handlers_that_wake_a_run_execute_on_the_event_loop() -> None:
+    import inspect
+
+    from backend.api import chat, desktop
+
+    # A plain `def` route runs on a worker thread, where waking a waiting run is unsafe.
+    for handler in (chat.answer_approval, desktop.set_control, desktop.get_control):
+        assert inspect.iscoroutinefunction(handler), handler.__name__

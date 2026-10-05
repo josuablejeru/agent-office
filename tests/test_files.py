@@ -139,3 +139,39 @@ def test_file_api_guards(tmp_path: Path) -> None:
         too_big = client.put(f"/api/agents/{agent_id}/files/big.bin", content=b"0" * (25 * 1024**2 + 1))
         assert too_big.status_code == 413
         assert client.get("/api/agents/999/files").status_code == 404
+
+
+def test_malformed_replies_from_the_agents_computer_are_handled(tmp_path: Path) -> None:
+    class Odd:
+        def __init__(self, replies: dict[str, Any]) -> None:
+            self.replies = replies
+
+        async def call(self, op: str, args: dict[str, Any] | None = None, timeout: float = 30.0) -> dict[str, Any]:
+            return self.replies[op]
+
+    destination = tmp_path / "out.bin"
+    for replies in (
+        {"shared.stat": {}, "shared.read_chunk": {"data": "aGk=", "eof": True}},
+        {"shared.stat": {"size": 2, "sha256": "x"}, "shared.read_chunk": {"eof": True}},
+        {"shared.stat": {"size": 2, "sha256": "x"}, "shared.read_chunk": {"data": "not base64!!", "eof": True}},
+        {"shared.stat": {"size": 2, "sha256": "x"}, "shared.read_chunk": {"data": 7, "eof": True}},
+    ):
+        with pytest.raises(TransferError):
+            run(download(Odd(replies), "a.bin", destination))  # type: ignore[arg-type]
+        assert not destination.exists()
+    for listing in ({}, {"files": "nope"}):
+        with pytest.raises(TransferError, match="unexpected reply"):
+            run(list_files(Odd({"shared.list": listing})))  # type: ignore[arg-type]
+
+
+def test_saved_files_are_marked_as_downloaded(tmp_path: Path) -> None:
+    import subprocess
+
+    from backend.api.files import quarantine
+
+    saved = tmp_path / "Report.pdf.command"
+    saved.write_text("echo hi")
+    quarantine(saved)
+    mark = subprocess.run(["/usr/bin/xattr", "-p", "com.apple.quarantine", str(saved)],
+                          capture_output=True, text=True).stdout
+    assert mark.startswith("0081;") and "Agent Office" in mark

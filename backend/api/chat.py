@@ -161,10 +161,14 @@ async def cancel_run(agent_id: int, runs: RunServiceDep) -> dict[str, bool]:
 
 
 @router.post("/approvals/{approval_id}")
-def answer_approval(
+async def answer_approval(
     approval_id: int, payload: ApprovalAnswer, session: SessionDep, approvals: ApprovalBrokerDep
 ) -> dict[str, bool]:
-    """Allow once or reject the action a paused run is waiting on."""
+    """Allow once or reject the action a paused run is waiting on.
+
+    Deliberately `async`: it wakes a coroutine, which must happen on the event
+    loop and not on a worker thread.
+    """
     approval = session.get(Approval, approval_id)
     if approval is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"approval {approval_id} not found")

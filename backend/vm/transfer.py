@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 from pathlib import Path
 
@@ -14,6 +15,9 @@ OUTDATED_DAEMON = (
     "This agent's computer is running an older version of its software. "
     "Turn the computer off and on again to update it."
 )
+
+
+UNEXPECTED_REPLY = "The agent's computer sent an unexpected reply. Turn it off and on, then try again."
 
 
 class TransferError(GuestError):
@@ -29,9 +33,14 @@ def explain(exc: GuestError) -> TransferError:
 
 async def list_files(client: GuestClient) -> list[dict[str, object]]:
     try:
-        return (await client.call("shared.list"))["files"]
+        files = (await client.call("shared.list"))["files"]
     except GuestError as exc:
         raise explain(exc) from exc
+    except (KeyError, TypeError) as exc:
+        raise TransferError(UNEXPECTED_REPLY) from exc
+    if not isinstance(files, list):
+        raise TransferError(UNEXPECTED_REPLY)
+    return files
 
 
 async def upload(client: GuestClient, name: str, data: bytes) -> dict[str, object]:
@@ -69,7 +78,11 @@ async def download(client: GuestClient, path: str, destination: Path) -> int:
     except GuestError as exc:
         destination.unlink(missing_ok=True)
         raise explain(exc) from exc
-    if offset != expected["size"] or digest.hexdigest() != expected["sha256"]:
+    except (KeyError, TypeError, ValueError, binascii.Error) as exc:
+        # The agent controls its own computer, so its replies cannot be assumed well-formed.
+        destination.unlink(missing_ok=True)
+        raise TransferError(UNEXPECTED_REPLY) from exc
+    if offset != expected.get("size") or digest.hexdigest() != expected.get("sha256"):
         destination.unlink(missing_ok=True)
         raise TransferError("The file changed or was damaged while it was being fetched. Try again.")
     return offset

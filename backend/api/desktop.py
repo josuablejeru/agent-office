@@ -35,14 +35,16 @@ def _require_agent(agent_id: int, session: Session) -> Agent:
     return agent
 
 
+# These two are `async` on purpose: they touch an asyncio.Event that a run is
+# waiting on, which is only safe from the event loop.
 @router.get("/control", dependencies=[Depends(require_api_token)])
-def get_control(agent_id: int, session: SessionDep, runs: RunServiceDep) -> ControlState:
+async def get_control(agent_id: int, session: SessionDep, runs: RunServiceDep) -> ControlState:
     _require_agent(agent_id, session)
     return ControlState(manual=runs.is_manual(agent_id))
 
 
 @router.put("/control", dependencies=[Depends(require_api_token)])
-def set_control(
+async def set_control(
     agent_id: int, payload: ControlState, session: SessionDep, runs: RunServiceDep
 ) -> ControlState:
     agent = _require_agent(agent_id, session)
