@@ -261,3 +261,21 @@ def test_large_answers_work_over_tcp(monkeypatch: pytest.MonkeyPatch) -> None:
             server.close()
 
     asyncio.run(scenario())
+
+
+def test_a_burst_of_lookups_reads_the_system_configuration_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    async def slow_scutil(*args: str, timeout: float = 5.0) -> str:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return ""
+
+    async def scenario() -> None:
+        monkeypatch.setattr(dns, "run_command", slow_scutil)
+        forwarder = DnsForwarder(free_port(), timeout=0.1)
+        await asyncio.gather(*(forwarder.resolve(query(f"host{i}.example")) for i in range(50)))
+
+    asyncio.run(scenario())
+    assert calls == 1

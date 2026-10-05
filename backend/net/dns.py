@@ -186,13 +186,19 @@ class DnsForwarder:
         ]
         self._view = DnsView()
         self._view_read_at = 0.0
+        self._view_lock = asyncio.Lock()
         self._udp: asyncio.DatagramTransport | None = None
         self._tcp: asyncio.Server | None = None
         self.running = False
 
     async def view(self) -> DnsView:
         """The Mac's current DNS setup, re-read every few seconds: VPNs come and go."""
-        if time.monotonic() - self._view_read_at > CONFIG_TTL_SECONDS:
+        if time.monotonic() - self._view_read_at <= CONFIG_TTL_SECONDS:
+            return self._view
+        # A page load sends dozens of lookups at once: only the first refreshes, the rest wait for it.
+        async with self._view_lock:
+            if time.monotonic() - self._view_read_at <= CONFIG_TTL_SECONDS:
+                return self._view
             output = await run_command("scutil", "--dns") or ""
             parsed = parse_scutil(output)
             # Rules from config.yaml come first so they win over the system's for the same domain.

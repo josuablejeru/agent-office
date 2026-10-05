@@ -174,9 +174,11 @@ Names need one more step. A VPN usually tells macOS "ask our servers about
 `corp.example`" (split DNS), and a VM would not learn that. The app therefore
 runs a small DNS forwarder on the Mac: each agent's computer sends its lookups
 there, and every lookup is passed to whichever server macOS would use for that
-name. It follows the Mac live, so connecting or disconnecting the VPN takes
-effect without restarting anything. Settings shows the internal domains
-currently in effect.
+name. It follows the Mac live: for full names (`jira.corp.example`),
+connecting or disconnecting the VPN takes effect within seconds. Short names
+(`jira`) depend on search domains, which an agent's computer only learns when
+it is turned on, so restart it after connecting the VPN if you rely on those.
+Settings shows the internal domains currently in effect.
 
 - Extra rules, if your VPN client does not register its domains with macOS:
 
@@ -186,8 +188,9 @@ currently in effect.
 
 - `network.split_dns: false` turns the forwarder off; agents then use basic
   DNS and internal names will not resolve.
-- An agent's computer picks the forwarder up when it is turned on, and its
-  lookups depend on the app running.
+- An agent's computer picks the forwarder up when it is turned on. Its name
+  lookups then depend on the app: while the app is closed, a computer that was
+  left running ("keep running after I quit") cannot resolve names.
 - **Signing in is separate.** The agent's Chrome has none of your sessions or
   certificates. Use Take control to log in once; tools that require a
   company-managed device or a client certificate will refuse it.
