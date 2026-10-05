@@ -61,7 +61,8 @@ class ScriptedModel:
     """A stand-in model server that speaks the OpenAI chat API.
 
     Each agent uses its own model name, so each has its own script: a queue of
-    turns (a tool call, or a final text). Every request is recorded, which lets
+    turns (a tool call, a final text, or a function of the request that returns
+    one of those). Every request is recorded, which lets
     a test check what the product actually sent to the model.
     """
 
@@ -91,6 +92,8 @@ class ScriptedModel:
                 model = request["model"]
                 outer.requests[model].append(request)
                 turn = outer.scripts[model].popleft() if outer.scripts[model] else "Done."
+                if callable(turn):  # decided from what the model was shown
+                    turn = turn(request)
                 if isinstance(turn, dict):
                     call_id = f"call_{len(outer.requests[model])}"
                     message = {

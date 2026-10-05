@@ -42,6 +42,7 @@ DEFAULT_PORT = 8765
 DEFAULT_SECRET_PATH = "/etc/agent-office/agent-secret"
 # Largest request frame; file.write content dominates.
 MAX_MESSAGE_BYTES = 4_500_000
+MAX_REPLY_BYTES = 4_300_000
 
 Operation = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -113,6 +114,17 @@ async def handle_message(raw: str | bytes) -> dict[str, Any]:
         return {"id": request_id, "ok": False, "error": f"internal error: {exc}"}
 
 
+def encode_reply(reply: dict[str, Any]) -> str:
+    """Serialise a reply, never larger than the other side accepts."""
+    # ensure_ascii=False: escaped, a megabyte of non-ASCII text would be six on the wire.
+    encoded = json.dumps(reply, ensure_ascii=False)
+    if len(encoded.encode("utf-8", "replace")) > MAX_REPLY_BYTES:
+        return json.dumps(
+            {"id": reply.get("id"), "ok": False, "error": "the result is too large to return; ask for less"}
+        )
+    return encoded
+
+
 async def serve(host: str, port: int, secret: str) -> None:
     # Imported here so the dispatch logic above stays importable without websockets.
     from websockets.asyncio.server import ServerConnection
@@ -127,7 +139,7 @@ async def serve(host: str, port: int, secret: str) -> None:
 
     async def handler(connection: ServerConnection) -> None:
         async for raw in connection:
-            await connection.send(json.dumps(await handle_message(raw)))
+            await connection.send(encode_reply(await handle_message(raw)))
 
     async with ws_serve(
         handler, host, port, process_request=authenticate, max_size=MAX_MESSAGE_BYTES

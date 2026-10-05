@@ -50,7 +50,10 @@ class GuestClient:
                     open_timeout=10,
                     proxy=None,
                 ) as connection:
-                    await connection.send(json.dumps({"id": 1, "op": op, "args": args or {}}))
+                    request = json.dumps({"id": 1, "op": op, "args": args or {}}, ensure_ascii=False)
+                    if len(request.encode("utf-8", "replace")) > MAX_REPLY_BYTES:
+                        raise GuestOperationError("that is too much data to send in one call; split it up")
+                    await connection.send(request)
                     reply = json.loads(await connection.recv())
         except InvalidStatus as exc:
             raise GuestError(f"guest daemon rejected the connection: {exc}") from exc

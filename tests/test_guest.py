@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from backend.vm.guest import GuestClient, GuestError, GuestOperationError
-from guest.agentd import handle_message, is_authorized, serve
+from guest.agentd import MAX_REPLY_BYTES, encode_reply, handle_message, is_authorized, serve
 from guest.files import file_list, file_read, file_write
 from guest.shell import shell_exec
 from guest.validation import OperationError
@@ -115,3 +115,51 @@ def test_client_and_daemon_end_to_end(tmp_path: Path) -> None:
 def test_replies_are_json_serialisable(tmp_path: Path) -> None:
     reply = run(handle_message(json.dumps({"id": 1, "op": "file.list", "args": {"path": str(tmp_path)}})))
     assert json.loads(json.dumps(reply))["result"]["entries"] == []
+
+
+# --- findings from the guest review ----------------------------------------------------------
+
+
+def test_shell_exec_returns_when_the_command_leaves_something_running(tmp_path: Path) -> None:
+    import time
+
+    started = time.monotonic()
+    result = run(shell_exec({"command": "sleep 20 & echo started", "timeout": 10, "cwd": str(tmp_path)}))
+    assert time.monotonic() - started < 4  # not the 10 s timeout, and not the 20 s of the child
+    assert result["stdout"] == "started\n" and result["exit_code"] == 0 and not result["timed_out"]
+
+
+def test_shell_exec_times_out_even_when_a_child_escaped_the_kill(tmp_path: Path) -> None:
+    import time
+
+    started = time.monotonic()
+    # setsid: the child leaves the process group, keeps the output pipe, and is not killed.
+    command = "python3 -c \"import os,time; os.setsid(); time.sleep(20)\" & sleep 30"
+    result = run(shell_exec({"command": command, "timeout": 1, "cwd": str(tmp_path)}))
+    assert result["timed_out"] and time.monotonic() - started < 5
+
+
+def test_a_long_file_is_read_in_parts(tmp_path: Path) -> None:
+    path = tmp_path / "long.txt"
+    path.write_text("a" * 70_000 + "END")
+    first = run(file_read({"path": str(path)}))
+    assert first["truncated"] and first["next_offset"] == len(first["content"]) and first["size"] == 70_003
+    rest = run(file_read({"path": str(path), "offset": first["next_offset"]}))
+    assert rest["content"].endswith("END") and not rest["truncated"] and "next_offset" not in rest
+
+
+def test_pipes_and_devices_are_refused_instead_of_blocking(tmp_path: Path) -> None:
+    import os
+
+    pipe = tmp_path / "pipe"
+    os.mkfifo(pipe)
+    for operation, args in ((file_read, {"path": str(pipe)}), (file_write, {"path": str(pipe), "content": "x"})):
+        with pytest.raises(OperationError, match="not a regular file"):
+            run(asyncio.wait_for(operation(args), 3))
+
+
+def test_replies_are_sent_as_plain_text_and_never_oversized() -> None:
+    reply = encode_reply({"id": 7, "ok": True, "result": {"content": "\x00é" * 1000}})
+    assert len(reply) < 8_000 and json.loads(reply)["result"]["content"] == "\x00é" * 1000
+    huge = json.loads(encode_reply({"id": 7, "ok": True, "result": {"content": "x" * (MAX_REPLY_BYTES + 1)}}))
+    assert huge == {"id": 7, "ok": False, "error": "the result is too large to return; ask for less"}

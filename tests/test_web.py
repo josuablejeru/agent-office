@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from guest.browser import shape_snapshot
+from guest.browser import describe_error, shape_snapshot
 from guest.elements import find_again, same_page
 from guest.search import detect_challenge, parse_results, search_url, unwrap_result_url
 
@@ -99,3 +99,37 @@ def test_ambiguous_or_missing_elements_are_not_guessed() -> None:
 def test_same_page_ignores_fragments() -> None:
     assert same_page("https://x.example/a#top", "https://x.example/a#results")
     assert not same_page("https://x.example/a", "https://x.example/b")
+
+
+def test_a_long_page_is_read_in_parts() -> None:
+    raw = {"text": "\n".join(f"line {n}" for n in range(3000)), "elements": [], "total_elements": 0}
+    first = shape_snapshot(raw, "https://example.com/", "Long", 10_000)
+    assert first["text_truncated"] and first["next_offset"] == 10_000
+    second = shape_snapshot(raw, "https://example.com/", "Long", 10_000, first["next_offset"])
+    assert second["text"] != first["text"] and (first["text"] + second["text"]).startswith("line 0\nline 1\n")
+    last = shape_snapshot(raw, "https://example.com/", "Long", 10_000, 20_000)
+    assert last["text"].endswith("line 2999") and not last["text_truncated"] and "next_offset" not in last
+
+
+def test_the_page_cannot_make_a_snapshot_arbitrarily_large() -> None:
+    snapshot = shape_snapshot({"text": "hi", "elements": []}, "https://x/" + "a" * 50_000, "T" * 5_000_000, 2_500)
+    assert len(snapshot["title"]) == 300 and len(snapshot["url"]) == 2_000
+
+
+def test_a_cut_element_list_says_so() -> None:
+    elements = [{"ref": n, "tag": "a", "label": str(n)} for n in range(1, 41)]
+    cut = shape_snapshot({"text": "", "elements": elements, "total_elements": 400}, "https://x/", "", 2_500)
+    assert cut["elements_truncated"].startswith("40 of 400 shown")
+    whole = shape_snapshot({"text": "", "elements": elements, "total_elements": 40}, "https://x/", "", 2_500)
+    assert "elements_truncated" not in whole
+
+
+def test_a_blocked_click_says_what_is_in_the_way() -> None:
+    error = Exception(
+        "Locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator\n"
+        '  - <div class="cookie-banner">…</div> intercepts pointer events\n  - retrying click action'
+    )
+    described = describe_error(error)
+    assert described.startswith("Locator.click: Timeout 10000ms exceeded.") and "cookie-banner" in described
+    assert describe_error(Exception("Page.goto: net::ERR_NAME_NOT_RESOLVED\nCall log:\n - x")) == (
+        "Page.goto: net::ERR_NAME_NOT_RESOLVED")

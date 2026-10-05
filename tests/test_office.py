@@ -517,7 +517,7 @@ def test_vertex_declares_argument_free_tools_without_a_schema() -> None:
 
     provider = VertexProvider("p", "global", "google/m", token_source=token)
     by_name = {tool.spec.name: provider._wire_tool(tool.spec)["function"] for tool in ALL_TOOLS}  # noqa: SLF001
-    assert "parameters" not in by_name["browser_read"] and "parameters" not in by_name["browser_screenshot"]
+    assert "parameters" not in by_name["browser_screenshot"]
     assert by_name["shell_exec"]["parameters"]["required"] == ["command"]
 
 

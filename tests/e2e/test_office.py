@@ -6,6 +6,7 @@ Tests run in file order and share two agents, as a day in the office would.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -155,6 +156,74 @@ def test_internal_names_resolve_on_the_agents_computer(office: Office, team: dic
     assert internal["stdout"].split()[0] == FAKE_INTERNAL_ADDRESS
     public = shell(office, "alice", team["alice"], "getent ahostsv4 example.com | head -1")
     assert public["exit_code"] == 0 and public["stdout"].split()[0] != FAKE_INTERNAL_ADDRESS
+
+
+PAGE = """<!doctype html><title>Sign in</title>
+<nav>{links}</nav>
+<p>{filler}</p>
+<form><input type="password" placeholder="Password" value="hunter2-secret">
+<ul><li role="menuitem" value="3" style="display:block;width:30px;height:30px"></li></ul></form>
+<iframe srcdoc="<p>Words that only exist inside the embedded frame of this page.</p>"></iframe>
+<button id="next" onclick="location.href = 'done.html'">Next step</button>
+<p>END-MARKER</p>
+"""
+
+
+# Serves the folder; the page after the button takes a while, as a real form submission does.
+SLOW_SERVER = """
+import http.server, time
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.endswith('done.html'):
+            time.sleep(1.5)
+        super().do_GET()
+http.server.ThreadingHTTPServer(('127.0.0.1', 8899), Handler).serve_forever()
+"""
+
+
+def test_the_browser_copes_with_an_awkward_page(office: Office, team: dict[str, int]) -> None:
+    alice = team["alice"]
+    page = PAGE.format(links="".join(f'<a href="#l{n}">link {n}</a> ' for n in range(300)),
+                       filler=" ".join(f"word{n}" for n in range(4000)))
+    office.model.script("alice", [
+        tool("file_write", path="site/index.html", content=page),
+        tool("file_write", path="site/done.html", content="<title>Done</title><p>You made it.</p>"),
+        # Starts a server that keeps running: the command must still return at once.
+        tool("file_write", path="site/serve.py", content=SLOW_SERVER),
+        tool("shell_exec", command="cd ~/site && python3 serve.py >/dev/null 2>&1 & sleep 1; echo up"),
+        tool("browser_goto", url="http://127.0.0.1:8899/index.html"),
+        tool("browser_scroll", direction="down", pages=20),
+        tool("browser_read"),
+        tool("browser_read", offset=10_000),
+        tool("browser_read", offset=20_000),
+        tool("browser_read", offset=30_000),
+        # The model clicks what the page it was last shown calls "Next step".
+        lambda request: tool("browser_click", ref=next((
+            element["ref"] for element in json.loads(
+                [m for m in request["messages"] if m["role"] == "tool"][-1]["content"])["elements"]
+            if element["label"] == "Next step"), 0)),
+        "done",
+    ])
+    started = time.time()
+    run = office.ask(alice)
+    assert run["status"] == "completed", run["error"]
+    served, opened, scrolled, *reads, clicked = (call["result"] for call in run["tool_calls"][3:])
+    everything = json.dumps([call["result"] for call in run["tool_calls"][4:]])  # all the browser showed
+
+    assert served["stdout"] == "up\n" and not served["timed_out"] and time.time() - started < 90
+    assert "hunter2-secret" not in everything  # a typed password never reaches the model
+    assert opened["title"] == "Sign in", {k: str(v)[:300] for k, v in opened.items()}
+    assert len(opened["elements"]) == 40 and "of 30" in opened["elements_truncated"]
+    assert "Next step" not in [element["label"] for element in opened["elements"]]  # 300 links come first
+
+    labels = {element["label"]: element for element in scrolled["elements"]}  # after scrolling: what is on screen
+    assert "Next step" in labels, (scrolled["scroll_y"], scrolled["page_height"], list(labels)[:8]) and labels["Password"]["type"] == "password" and scrolled["scroll_y"] > 0
+
+    text = "".join(read["text"] for read in reads)
+    assert reads[0]["next_offset"] == 10_000 and not reads[-1]["text_truncated"]
+    assert "word0 " in text and "word3999" in text and "END-MARKER" in text
+    assert "only exist inside the embedded frame" in text
+    assert clicked["url"].endswith("/done.html") and clicked["title"] == "Done"  # waited for the page to change
 
 
 def test_turning_a_computer_off_stops_the_agents_task(office: Office, team: dict[str, int]) -> None:

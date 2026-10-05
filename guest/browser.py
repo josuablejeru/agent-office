@@ -47,6 +47,14 @@ BRIEF_TEXT_CHARS = 2_500
 BRIEF_ELEMENTS = 40
 FULL_TEXT_CHARS = 10_000
 FULL_ELEMENTS = 120
+MAX_TITLE_CHARS = 300
+MAX_SHOWN_URL_CHARS = 2_000
+# Embedded frames (login boxes, embedded documents) are read too, within limits.
+MAX_FRAMES = 5
+FRAME_TEXT_CHARS = 3_000
+# Below the 75 s the host waits, so the model gets a reason and not "did not answer".
+OPERATION_TIMEOUT_SECONDS = 50.0
+SEARCH_TIMEOUT_SECONDS = 70.0
 SCREENSHOT_JPEG_QUALITY = 70
 
 # Numbers the page's visible interactive elements so a model can refer to them
@@ -57,24 +65,58 @@ SNAPSHOT_SCRIPT = """
     '[role=button], [role=link], [role=tab], [role=menuitem], [role=checkbox], ' +
     '[contenteditable=""], [contenteditable="true"]';
   document.querySelectorAll('[data-gl-ref]').forEach((el) => el.removeAttribute('data-gl-ref'));
-  const elements = [];
+  // What is on screen comes first, so scrolling brings other elements into the list
+  // even on a page with hundreds of links above them.
+  const onScreen = [], elsewhere = [];
   for (const el of document.querySelectorAll(selector)) {
-    if (elements.length >= limit) break;
+    if (onScreen.length + elsewhere.length >= 3000) break;
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
     if (rect.width < 2 || rect.height < 2 || style.visibility === 'hidden' || el.disabled) continue;
     if (el.tagName === 'INPUT' && el.type === 'hidden') continue;
-    const ref = elements.length + 1;
+    const visible = rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+    (visible ? onScreen : elsewhere).push(el);
+  }
+  const elements = onScreen.concat(elsewhere).slice(0, limit).map((el, index) => {
+    const ref = index + 1;
     el.setAttribute('data-gl-ref', String(ref));
-    const label = (el.innerText || el.value || el.getAttribute('aria-label') ||
+    // Never the contents of a password field: this text goes to the model and the logs.
+    const secret = el.tagName === 'INPUT' && el.type === 'password';
+    const label = String(el.innerText || (secret ? '' : el.value) || el.getAttribute('aria-label') ||
       el.getAttribute('placeholder') || el.getAttribute('title') || el.name || '')
       .replace(/\\s+/g, ' ').trim().slice(0, 80);
     const item = { ref, tag: el.tagName.toLowerCase(), label };
     if (el.tagName === 'INPUT') item.type = el.type;
-    if (el.tagName === 'A') item.href = el.href.slice(0, 200);
-    elements.push(item);
+    if (el.tagName === 'A') item.href = String(el.href).slice(0, 200);
+    return item;
+  });
+  return {
+    text: document.body ? document.body.innerText : '',
+    elements,
+    total_elements: onScreen.length + elsewhere.length,
+  };
+}
+"""
+
+# Scrolls the window, or, on pages that scroll inside a container, the largest such container.
+SCROLL_SCRIPT = """
+(factor) => {
+  const before = scrollY;
+  window.scrollBy(0, factor * innerHeight);
+  if (scrollY !== before || factor === 0) {
+    return { y: Math.round(scrollY), height: document.documentElement.scrollHeight };
   }
-  return { text: document.body ? document.body.innerText : '', elements };
+  let best = null, area = 0;
+  for (const el of document.querySelectorAll('*')) {
+    if (el.scrollHeight <= el.clientHeight + 40) continue;
+    const overflow = getComputedStyle(el).overflowY;
+    if (overflow !== 'auto' && overflow !== 'scroll') continue;
+    const size = el.clientWidth * el.clientHeight;
+    if (size > area) { best = el; area = size; }
+  }
+  if (!best) return { y: Math.round(scrollY), height: document.documentElement.scrollHeight };
+  best.scrollBy(0, factor * best.clientHeight);
+  return { y: Math.round(best.scrollTop), height: best.scrollHeight };
 }
 """
 
@@ -87,20 +129,44 @@ def validate_url(url: str) -> str:
     return url
 
 
-def shape_snapshot(raw: dict[str, Any], url: str, title: str, text_chars: int) -> dict[str, Any]:
+def shape_snapshot(
+    raw: dict[str, Any], url: str, title: str, text_chars: int, offset: int = 0
+) -> dict[str, Any]:
     """Trim a page snapshot to a size a model's context can afford."""
     text = "\n".join(line.strip() for line in str(raw.get("text", "")).splitlines() if line.strip())
+    # The page chooses its title and address: neither may be arbitrarily long.
+    url, title = url[:MAX_SHOWN_URL_CHARS], title[:MAX_TITLE_CHARS]
+    elements = raw.get("elements", [])
+    end = offset + text_chars
     snapshot: dict[str, Any] = {
         "url": url,
         "title": title,
-        "text": text[:text_chars],
-        "text_truncated": len(text) > text_chars,
-        "elements": raw.get("elements", []),
+        "text": text[offset:end],
+        "text_truncated": len(text) > end,
+        "elements": elements,
     }
+    if len(text) > end:
+        snapshot["next_offset"] = end  # browser_read with this offset returns the next part
+    total = raw.get("total_elements")
+    if isinstance(total, int) and total > len(elements):
+        snapshot["elements_truncated"] = (
+            f"{len(elements)} of {total} shown, those on screen first; scroll to reach others"
+        )
     if blocked := detect_challenge(url, title, text):
         # Say so in words: a model otherwise reads the bot check as the page's content.
         snapshot = {"blocked": True, "note": blocked, **snapshot, "elements": []}
     return snapshot
+
+
+def describe_error(exc: Exception) -> str:
+    """A Playwright error in one or two lines: what failed, and what was in the way."""
+    lines = str(exc).splitlines() or ["the browser action failed"]
+    message = lines[0][:300]
+    # Playwright appends a long call log; this is the one line of it worth keeping.
+    for line in lines[1:]:
+        if "intercepts pointer events" in line:
+            return f"{message} (another element is in the way: {line.strip(' -')[:200]})"
+    return message
 
 
 def find_browser() -> str:
@@ -127,6 +193,9 @@ class Browser:
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
+        self._start_lock = asyncio.Lock()
+        # Pages that stopped responding; never picked again.
+        self._stuck: list[Any] = []
         self._playwright: Any = None
         self._browser: Any = None
         self._page: Any = None
@@ -140,6 +209,13 @@ class Browser:
         """Open the browser window on the desktop if it is not already there."""
         if await asyncio.to_thread(cdp_alive):
             return
+        # One at a time: a second caller arriving while Chrome starts must wait for
+        # it, not remove its profile lock and start another Chrome on the same profile.
+        async with self._start_lock:
+            if not await asyncio.to_thread(cdp_alive):
+                await self._start()
+
+    async def _start(self) -> None:
         display = os.environ.get("DISPLAY", "")
         if not display or not Path(f"/tmp/.X11-unix/X{display.rsplit(':', 1)[-1]}").exists():
             raise OperationError("the desktop session is not running yet")
@@ -176,32 +252,81 @@ class Browser:
                 self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
             self._page = None
+            self._stuck = []
         context = self._browser.contexts[0]
         if self._page is None or self._page.is_closed():
-            pages = [page for page in context.pages if not page.is_closed()]
+            pages = [page for page in context.pages if not page.is_closed() and page not in self._stuck]
             self._page = pages[-1] if pages else await context.new_page()
             self._page.set_default_timeout(ACTION_TIMEOUT_MS)
         return self._page
 
-    async def _run(self, action: Any) -> dict[str, Any]:
+    async def _run(self, action: Any, timeout: float = OPERATION_TIMEOUT_SECONDS) -> dict[str, Any]:
         from playwright.async_api import Error as PlaywrightError
+
+        async def perform() -> dict[str, Any]:
+            return await action(await self._connect())
 
         async with self._lock:
             try:
-                return await action(await self._connect())
+                # A page whose scripts never yield would otherwise hold the lock, and
+                # with it every later browser operation, for good.
+                return await asyncio.wait_for(perform(), timeout)
+            except TimeoutError:
+                if self._page is not None:
+                    self._stuck.append(self._page)
+                    self._page = None
+                raise OperationError(
+                    "the page stopped responding, so it was left behind; "
+                    "the next browser action opens a fresh tab"
+                ) from None
             except PlaywrightError as exc:
-                # First line only: Playwright appends a long call log.
-                raise OperationError(str(exc).splitlines()[0][:300]) from exc
+                raise OperationError(describe_error(exc)) from exc
 
-    async def _snapshot(self, page: Any, text_chars: int, max_elements: int) -> dict[str, Any]:
-        try:
-            await page.wait_for_load_state("domcontentloaded", timeout=SETTLE_TIMEOUT_MS)
-        except Exception:  # noqa: BLE001 - a slow page still gets a best-effort snapshot
-            pass
-        raw = await page.evaluate(SNAPSHOT_SCRIPT, max_elements)
+    async def _snapshot(
+        self, page: Any, text_chars: int, max_elements: int, offset: int = 0
+    ) -> dict[str, Any]:
+        from playwright.async_api import Error as PlaywrightError
+
+        for attempt in (1, 2):
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=SETTLE_TIMEOUT_MS)
+            except Exception:  # noqa: BLE001 - a slow page still gets a best-effort snapshot
+                pass
+            try:
+                raw = await page.evaluate(SNAPSHOT_SCRIPT, max_elements)
+                break
+            except PlaywrightError:
+                # The page navigated while it was being read: read the new one.
+                if attempt == 2:
+                    raise
+                await page.wait_for_timeout(500)
         self._elements = {int(element["ref"]): element for element in raw.get("elements", [])}
         self._elements_url = page.url
-        return shape_snapshot(raw, page.url, await page.title(), text_chars)
+        if text_chars >= FULL_TEXT_CHARS:
+            raw["text"] = str(raw.get("text", "")) + await self._frame_text(page)
+        return shape_snapshot(raw, page.url, await page.title(), text_chars, offset)
+
+    async def _frame_text(self, page: Any) -> str:
+        """Text of embedded frames, which the page's own text does not include."""
+        parts = []
+        for frame in [frame for frame in page.frames if frame != page.main_frame][:MAX_FRAMES]:
+            try:
+                text = await asyncio.wait_for(
+                    frame.evaluate("() => document.body ? document.body.innerText : ''"), 3
+                )
+            except Exception:  # noqa: BLE001 - a frame that cannot be read is skipped
+                continue
+            if len(text.strip()) > 40:
+                parts.append(f"\n[embedded frame {frame.url[:120]}]\n{text[:FRAME_TEXT_CHARS]}")
+        return "".join(parts)
+
+    async def _settle(self, page: Any) -> None:
+        """Wait for what an action set off (a form being sent, a page loading) to arrive."""
+        await page.wait_for_timeout(150)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=SETTLE_TIMEOUT_MS)
+        except Exception:  # noqa: BLE001 - busy pages never go quiet; read them as they are
+            pass
 
     async def _target(self, page: Any, args: dict[str, Any]) -> Any:
         ref = args.get("ref")
@@ -237,12 +362,19 @@ class Browser:
 
     async def _act(self, page: Any, action: Any) -> dict[str, Any]:
         """Run an action on an element; if the page changed under it, return the fresh page."""
+        from playwright.async_api import Error as PlaywrightError
+
         try:
             await action()
         except StalePage as exc:
-            snapshot = await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)
-            return {"error": str(exc), **snapshot}
-        return await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)
+            problem = str(exc)
+        except PlaywrightError as exc:
+            # With the page as it is now, so the model can see why and choose
+            # differently instead of repeating the same action.
+            problem = describe_error(exc)
+        else:
+            return await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)
+        return {"error": problem, **await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)}
 
     async def goto(self, args: dict[str, Any]) -> dict[str, Any]:
         url = validate_url(require_str(args, "url", MAX_URL_LENGTH))
@@ -261,7 +393,7 @@ class Browser:
 
             async def click() -> None:
                 await (await self._target(page, args)).click()
-                await page.wait_for_timeout(600)
+                await self._settle(page)
 
             result = await self._act(page, click)
             if "error" not in result and len(context.pages) > known:
@@ -285,7 +417,7 @@ class Browser:
                 await target.fill(text)
                 if submit:
                     await target.press("Enter")
-                    await page.wait_for_timeout(800)
+                    await self._settle(page)
 
             return await self._act(page, fill)
 
@@ -319,14 +451,14 @@ class Browser:
                 problems.append(f"{engine}: no results")
             raise OperationError("the web search did not work (" + "; ".join(problems) + ")")
 
-        return await self._run(action)
+        return await self._run(action, SEARCH_TIMEOUT_SECONDS)
 
     async def press(self, args: dict[str, Any]) -> dict[str, Any]:
         key = require_str(args, "key", 40)
 
         async def action(page: Any) -> dict[str, Any]:
             await page.keyboard.press(key)
-            await page.wait_for_timeout(500)
+            await self._settle(page)
             return await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)
 
         return await self._run(action)
@@ -339,17 +471,18 @@ class Browser:
 
         async def action(page: Any) -> dict[str, Any]:
             sign = 1 if direction == "down" else -1
-            await page.evaluate("(f) => window.scrollBy(0, f * window.innerHeight)", sign * pages)
+            await page.evaluate(SCROLL_SCRIPT, sign * pages)
             await page.wait_for_timeout(300)
-            position = await page.evaluate(
-                "() => ({ y: Math.round(scrollY), height: document.documentElement.scrollHeight })"
-            )
-            return {"url": page.url, "scroll_y": position["y"], "page_height": position["height"]}
+            position = await page.evaluate(SCROLL_SCRIPT, 0)
+            # With the elements now on screen, so the next click needs no extra read.
+            snapshot = await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)
+            return {"scroll_y": position["y"], "page_height": position["height"], **snapshot}
 
         return await self._run(action)
 
     async def extract_text(self, args: dict[str, Any]) -> dict[str, Any]:
-        return await self._run(lambda page: self._snapshot(page, FULL_TEXT_CHARS, FULL_ELEMENTS))
+        offset = int(optional_number(args, "offset", 0, 0, 10_000_000))
+        return await self._run(lambda page: self._snapshot(page, FULL_TEXT_CHARS, FULL_ELEMENTS, offset))
 
     async def screenshot(self, args: dict[str, Any]) -> dict[str, Any]:
         async def action(page: Any) -> dict[str, Any]:
@@ -358,8 +491,8 @@ class Browser:
                 "() => ({ width: innerWidth, height: innerHeight })"
             )
             return {
-                "url": page.url,
-                "title": await page.title(),
+                "url": page.url[:MAX_SHOWN_URL_CHARS],
+                "title": (await page.title())[:MAX_TITLE_CHARS],
                 "width": size["width"],
                 "height": size["height"],
                 "image_format": "jpeg",
@@ -370,7 +503,7 @@ class Browser:
 
     async def current_url(self, args: dict[str, Any]) -> dict[str, Any]:
         async def action(page: Any) -> dict[str, Any]:
-            return {"url": page.url, "title": await page.title()}
+            return {"url": page.url[:MAX_SHOWN_URL_CHARS], "title": (await page.title())[:MAX_TITLE_CHARS]}
 
         return await self._run(action)
 

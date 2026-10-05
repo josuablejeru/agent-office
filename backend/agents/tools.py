@@ -82,8 +82,11 @@ ALL_TOOLS: list[AgentTool] = [
         permission="files",
         spec=ToolSpec(
             name="file_read",
-            description="Read a text file from your computer.",
-            parameters=_schema({"path": {"type": "string"}}, ["path"]),
+            description=(
+                "Read a text file from your computer. A long file comes back in parts: "
+                "pass the returned next_offset as offset to read on."
+            ),
+            parameters=_schema({"path": {"type": "string"}, "offset": {"type": "integer"}}, ["path"]),
         ),
     ),
     AgentTool(
@@ -142,9 +145,10 @@ ALL_TOOLS: list[AgentTool] = [
         spec=ToolSpec(
             name="browser_read",
             description=(
-                "Read the current page: more of its text and all numbered interactive elements."
+                "Read the current page: more of its text and its numbered interactive elements. "
+                "A long page comes back in parts: pass the returned next_offset as offset to read on."
             ),
-            parameters=_schema({}, []),
+            parameters=_schema({"offset": {"type": "integer"}}, []),
         ),
     ),
     AgentTool(

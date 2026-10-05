@@ -275,3 +275,16 @@ To uninstall: delete `/Applications/Agent Office.app`,
 | The app says it is already running | Quit the other copy, or a `start-dev.sh` session |
 
 API reference: run from source and open http://127.0.0.1:8000/docs.
+
+## Tests
+
+```sh
+uv run pytest                                   # unit tests, seconds
+AGENT_OFFICE_E2E=1 uv run pytest tests/e2e -v   # real agent computers, about two minutes
+AGENT_OFFICE_E2E=1 AGENT_OFFICE_E2E_MODEL=ollama/qwen3:8b \
+  uv run pytest tests/e2e/test_live_model.py -v  # everyday tasks with a real model
+```
+
+The end-to-end tests start their own backend and agent computers in a throwaway
+directory, with a scripted stand-in for the model. They need the base image and
+do not touch your agents.
