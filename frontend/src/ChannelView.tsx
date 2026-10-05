@@ -6,8 +6,10 @@ import { Avatar } from "./Avatar";
 import type { Agent, Channel, ChannelMessage } from "./types";
 
 const POLL_MS = 2000;
+// As in the chat: links open outside, and images are never fetched.
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  img: ({ alt }) => <span className="muted">[image{alt ? `: ${alt}` : ""}]</span>,
 };
 
 interface Props {

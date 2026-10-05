@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import stat
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -141,11 +143,17 @@ class Settings(BaseModel):
         listening on 127.0.0.1 alone does not keep an agent away from this API.
         """
         path = self.api_token_path
-        if not path.exists():
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        token = path.read_text().strip() if path.exists() else ""
+        if not token:
+            # Also replaces an empty file left by an interrupted first start: an
+            # empty token would let anyone in. Written whole, then moved into place.
+            token = secrets.token_urlsafe(32)
+            temporary = path.with_suffix(".tmp")
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as handle:
-                handle.write(secrets.token_urlsafe(32) + "\n")
-        return path.read_text().strip()
+                handle.write(token + "\n")
+            os.replace(temporary, path)
+        return token
 
     def screenshots_dir(self, name: str) -> Path:
         return self.agent_dir(name) / "screenshots"
@@ -189,7 +197,12 @@ class Settings(BaseModel):
         return merge_config(DEFAULT_CONFIG, self.load_user_config())
 
     def update_user_config(self, path: list[str], value: Any) -> None:
-        """Set one value in config.yaml, leaving everything else as the user wrote it."""
+        """Set one value in config.yaml.
+
+        Other values are kept, but the file is rewritten: comments in it are
+        lost. A symlinked config.yaml stays a symlink, and the file keeps its
+        permissions.
+        """
         config = self.load_user_config()
         node = config
         for key in path[:-1]:
@@ -197,10 +210,13 @@ class Settings(BaseModel):
                 node[key] = {}
             node = node[key]
         node[path[-1]] = value
-        # Written beside the file and swapped in, so a crash cannot leave it half-written.
-        temporary = self.config_path.with_suffix(".yaml.tmp")
-        temporary.write_text(yaml.safe_dump(config, sort_keys=False))
-        os.replace(temporary, self.config_path)
+        # Written beside the real file and swapped in, so a crash cannot leave it half-written.
+        target = Path(os.path.realpath(self.config_path))
+        fd, temporary = tempfile.mkstemp(prefix=".config-", suffix=".tmp", dir=target.parent)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(yaml.safe_dump(config, sort_keys=False))
+        os.chmod(temporary, stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o644)
+        os.replace(temporary, target)
 
     def load_providers(self) -> dict[str, ProviderSettings]:
         raw = self.load_config().get("providers") or {}

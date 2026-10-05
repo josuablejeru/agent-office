@@ -153,7 +153,7 @@ export const api = {
     request<{ approved: boolean }>(`/api/approvals/${approvalId}`, post({ approved })),
   /** Screenshots need the auth header, so they are fetched rather than linked. */
   screenshotBlob: async (id: number, filename: string) => {
-    const response = await fetch(`/api/agents/${id}/screenshots/${filename}`, {
+    const response = await fetch(`/api/agents/${id}/screenshots/${encodeURIComponent(filename)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) throw new Error("Screenshot unavailable");

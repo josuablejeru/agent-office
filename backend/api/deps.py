@@ -55,8 +55,10 @@ def get_base_image_builder(request: Request) -> BaseImageBuilder:
 def require_api_token(request: Request) -> None:
     """Reject requests that do not carry the local API token."""
     header = request.headers.get("Authorization", "")
-    expected = f"Bearer {request.app.state.api_token}"
-    if not hmac.compare_digest(header.encode(), expected.encode()):
+    token = request.app.state.api_token
+    expected = f"Bearer {token}"
+    # An empty token must never authenticate, whatever led to it.
+    if not token or not hmac.compare_digest(header.encode(), expected.encode()):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing or invalid API token.")
 
 

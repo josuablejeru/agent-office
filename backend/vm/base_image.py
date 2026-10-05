@@ -60,6 +60,13 @@ class BaseImageBuilder:
         return self.status()
 
     async def _build(self) -> None:
+        try:
+            await self._run_script()
+        except Exception as exc:  # noqa: BLE001 - the status must end up saying what happened
+            self._detail = f"Build failed: {exc}"
+            log.exception("base image build crashed")
+
+    async def _run_script(self) -> None:
         log.info("base image build started")
         env = {**os.environ, "AGENT_OFFICE_HOME": str(self._settings.home), "IMAGE_NAME": DEFAULT_IMAGE}
         with self.log_path.open("w") as build_log:

@@ -70,6 +70,19 @@ export function App() {
     void connect(loadToken());
   }, [connect]);
 
+  // If the first attempt failed for a reason other than the token (the backend
+  // was still starting), keep trying: the app window has no reload button.
+  useEffect(() => {
+    if (authorized !== null) return;
+    const timer = window.setInterval(() => void connect(loadToken()), 3000);
+    return () => window.clearInterval(timer);
+  }, [authorized, connect]);
+
+  // An error belongs to what the user was doing; moving elsewhere dismisses it.
+  useEffect(() => {
+    setError(null);
+  }, [view?.kind, view?.id]);
+
   useEffect(() => {
     if (!authorized) return;
     const timer = window.setInterval(() => void refresh().catch(() => undefined), REFRESH_INTERVAL_MS);

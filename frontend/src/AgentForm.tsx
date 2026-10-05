@@ -14,6 +14,7 @@ interface Props {
   onClose: () => void;
   onSaved: (agent: Agent) => Promise<void> | void;
   onDeleted?: () => Promise<void> | void;
+  onCleared?: () => void;
 }
 
 /** Prefer a model server on this machine: it needs no key and keeps data local. */
@@ -48,6 +49,7 @@ export function AgentForm({
   onClose,
   onSaved,
   onDeleted,
+  onCleared,
 }: Props) {
   const [form, setForm] = useState<AgentCreate>({
     name: agent?.name ?? "",
@@ -130,11 +132,20 @@ export function AgentForm({
       } else {
         saved = await api.createAgent(payload);
       }
+      let photoProblem: string | null = null;
       if (photo) {
-        await api.uploadAvatar(saved.id, photo);
-        onAvatarChanged?.();
+        try {
+          await api.uploadAvatar(saved.id, photo);
+          onAvatarChanged?.();
+        } catch (err) {
+          photoProblem = err instanceof Error ? err.message : String(err);
+        }
       }
       await onSaved(saved);
+      if (photoProblem) {
+        // The agent itself was saved; only the picture was not.
+        window.alert(`The agent was saved, but its photo was not: ${photoProblem}`);
+      }
     });
   }
 
@@ -155,7 +166,7 @@ export function AgentForm({
     if (!window.confirm(`Clear the conversation with "${agent.name}"? Its computer and files stay.`)) return;
     void guarded(async () => {
       await api.clearConversation(agent.id);
-      await onSaved(agent);
+      onCleared?.();
     });
   }
 

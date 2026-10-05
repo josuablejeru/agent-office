@@ -18,8 +18,11 @@ const OUTCOME_NOTES: Record<string, string> = {
 
 // Links open in the system browser: followed in place, they would replace the
 // app's own window, which has no back button.
+// Images are not loaded: fetching one would send its address, which a manipulated
+// agent could fill with private text, to an outside server without any click.
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  img: ({ alt }) => <span className="muted">[image{alt ? `: ${alt}` : ""}]</span>,
 };
 
 function summarize(call: ToolCall): string {
@@ -58,6 +61,9 @@ function ToolCalls({ agentId, calls }: { agentId: number; calls: ToolCall[] }) {
 }
 
 export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
+  // A run can start without this chat sending anything: a channel mention, or a
+  // colleague handing work over. The agent's activity changing is the signal to look.
+  const activity = agent.activity;
   const [messages, setMessages] = useState<Message[]>([]);
   const [runs, setRuns] = useState<Record<number, Run>>({});
   const [activeRun, setActiveRun] = useState<number | null>(null);
@@ -89,7 +95,7 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
 
   useEffect(() => {
     void load().catch((err) => setError(String(err.message ?? err)));
-  }, [load]);
+  }, [load, activity]);
 
   useEffect(() => {
     if (activeRun === null) return;

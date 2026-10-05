@@ -15,7 +15,7 @@ from sqlmodel import Session
 from backend.agents.manager import AgentManager
 from backend.config import Settings
 from backend.db.database import create_db_engine, init_db
-from backend.instance import is_running
+from backend.instance import AlreadyRunning, acquire_instance_lock
 from backend.logging_config import configure_logging, get_logger
 from backend.vm.lifecycle import QemuVMManager, VMManager, VMStatus
 
@@ -43,16 +43,23 @@ def main() -> int:
     settings = Settings.from_env()
     if not settings.db_path.exists():
         return 0
-    if is_running(settings):
+    try:
+        # Held until the VMs are off: a backend started meanwhile must wait its
+        # turn instead of adopting computers that are being powered down.
+        lock = acquire_instance_lock(settings)
+    except AlreadyRunning:
         # Another backend (for example a dev server) is using these VMs.
         log.info("vms left running: another backend is active")
         return 0
-    if (settings.load_config().get("app") or {}).get("keep_vms_running_on_quit"):
-        log.info("vms left running: keep_vms_running_on_quit is set")
+    try:
+        if (settings.load_config().get("app") or {}).get("keep_vms_running_on_quit"):
+            log.info("vms left running: keep_vms_running_on_quit is set")
+            return 0
+        stopped = asyncio.run(stop_all_vms(settings))
+        log.info("vms stopped at exit", extra={"count": stopped})
         return 0
-    stopped = asyncio.run(stop_all_vms(settings))
-    log.info("vms stopped at exit", extra={"count": stopped})
-    return 0
+    finally:
+        lock.close()
 
 
 if __name__ == "__main__":

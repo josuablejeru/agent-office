@@ -33,6 +33,8 @@ export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, on
   // Which side panel is open next to the chat.
   const [panel, setPanel] = useState<"computer" | "files" | "memory" | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Changed to make the chat start afresh, after the conversation was cleared.
+  const [chatEpoch, setChatEpoch] = useState(0);
   const running = agent.vm_status === "running";
 
   useEffect(() => {
@@ -132,7 +134,7 @@ export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, on
       {modelProblem && <div className="notice">{modelProblem}</div>}
 
       <div className={panel && running ? "workspace split" : "workspace"}>
-        <Chat agent={agent} ready={running && guestReady} />
+        <Chat key={chatEpoch} agent={agent} ready={running && guestReady} />
         {panel === "computer" && running && <Computer agent={agent} />}
         {panel === "files" && running && <Files agent={agent} />}
         {panel === "memory" && running && <MemoryPanel agent={agent} />}
@@ -148,6 +150,10 @@ export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, on
           onSaved={async () => {
             setSettingsOpen(false);
             await onChanged();
+          }}
+          onCleared={() => {
+            setSettingsOpen(false);
+            setChatEpoch((epoch) => epoch + 1);
           }}
           onDeleted={async () => {
             setSettingsOpen(false);

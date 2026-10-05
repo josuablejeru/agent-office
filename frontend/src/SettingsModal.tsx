@@ -232,7 +232,8 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
         <h3>Model providers</h3>
         <p className="hint">
           API keys are stored in your macOS Keychain and never reach an agent&apos;s computer. More
-          providers can be added in <code>~/.config/agent-office/config.yaml</code>.
+          providers can be added in <code>~/.config/agent-office/config.yaml</code>; saving from this
+          dialog rewrites that file without its comments.
         </p>
         {providers.map((provider) =>
           provider.uses_google_cloud ? (

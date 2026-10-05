@@ -81,7 +81,7 @@ async def vnc_bridge(websocket: WebSocket, agent_id: int) -> None:
         ),
         "",
     )
-    if not hmac.compare_digest(token.encode(), app.state.api_token.encode()):
+    if not token or not hmac.compare_digest(token.encode(), app.state.api_token.encode()):
         await websocket.close(code=POLICY_VIOLATION)
         return
     with Session(app.state.engine) as session:

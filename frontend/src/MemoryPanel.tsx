@@ -11,6 +11,8 @@ export function MemoryPanel({ agent }: { agent: Agent }) {
   const [subject, setSubject] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Kept apart from `error`: a background refresh must not erase what just went wrong.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -36,7 +38,7 @@ export function MemoryPanel({ agent }: { agent: Agent }) {
       setNote("");
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -45,7 +47,7 @@ export function MemoryPanel({ agent }: { agent: Agent }) {
       await api.forgetFact(agent.id, id);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -67,6 +69,11 @@ export function MemoryPanel({ agent }: { agent: Agent }) {
         />
       </div>
       {error && <div className="notice error">{error}</div>}
+      {actionError && (
+        <div className="notice error" onClick={() => setActionError(null)} title="Dismiss">
+          {actionError}
+        </div>
+      )}
       <div className="file-list">
         {memory?.facts.length === 0 && (
           <p className="hint">

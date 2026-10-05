@@ -15,6 +15,8 @@ export function Files({ agent }: { agent: Agent }) {
   const [files, setFiles] = useState<SharedFile[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Kept apart from `error`: a background refresh must not erase what just went wrong.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
 
@@ -39,6 +41,7 @@ export function Files({ agent }: { agent: Agent }) {
     if (chosen.length === 0) return;
     setBusy(true);
     setNotice(null);
+    setActionError(null);
     try {
       for (const file of chosen) await api.uploadFile(agent.id, file);
       setNotice(
@@ -46,7 +49,7 @@ export function Files({ agent }: { agent: Agent }) {
       );
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -58,9 +61,9 @@ export function Files({ agent }: { agent: Agent }) {
     try {
       const { saved_to } = await api.saveFile(agent.id, file.path);
       setNotice(`Saved to ${saved_to.replace(/^\/Users\/[^/]+/, "~")}`);
-      setError(null);
+      setActionError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -78,6 +81,11 @@ export function Files({ agent }: { agent: Agent }) {
         <input ref={picker} type="file" multiple hidden onChange={(e) => void upload(e)} />
       </div>
       {error && <div className="notice error">{error}</div>}
+      {actionError && (
+        <div className="notice error" onClick={() => setActionError(null)} title="Dismiss">
+          {actionError}
+        </div>
+      )}
       {notice && <div className="notice ok">{notice}</div>}
       <div className="file-list">
         {files?.length === 0 && (

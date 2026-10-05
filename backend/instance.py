@@ -38,9 +38,14 @@ def acquire_instance_lock(settings: Settings) -> IO[str]:
 
 
 def is_running(settings: Settings) -> bool:
-    """True if some backend currently holds the lock."""
-    try:
-        acquire_instance_lock(settings).close()
-    except AlreadyRunning:
-        return True
+    """True if some backend currently holds the lock. Only looks; changes nothing."""
+    path = settings.home / LOCK_FILENAME
+    if not path.exists():
+        return False
+    with open(path) as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        fcntl.flock(handle, fcntl.LOCK_UN)
     return False

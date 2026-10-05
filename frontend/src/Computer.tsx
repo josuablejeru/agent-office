@@ -12,6 +12,9 @@ export function Computer({ agent }: { agent: Agent }) {
   const [connection, setConnection] = useState<Connection>("connecting");
   const [manual, setManual] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Read when a connection is (re)made, without reconnecting when it changes.
+  const manualRef = useRef(manual);
+  manualRef.current = manual;
 
   useEffect(() => {
     if (!screen.current) return;
@@ -19,7 +22,7 @@ export function Computer({ agent }: { agent: Agent }) {
     const client = new RFB(screen.current, api.vncUrl(agent.id), {
       wsProtocols: api.vncProtocols(),
     });
-    client.viewOnly = true;
+    client.viewOnly = !manualRef.current;
     client.scaleViewport = true;
     client.background = "#000";
     client.addEventListener("connect", () => setConnection("connected"));

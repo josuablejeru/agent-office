@@ -585,3 +585,65 @@ def test_handlers_that_wake_a_run_execute_on_the_event_loop() -> None:
     # A plain `def` route runs on a worker thread, where waking a waiting run is unsafe.
     for handler in (chat.answer_approval, desktop.set_control, desktop.get_control):
         assert inspect.iscoroutinefunction(handler), handler.__name__
+
+
+# --- findings from the second review ---------------------------------------------------------
+
+
+def test_an_empty_token_file_is_replaced_and_never_authenticates(settings: Settings) -> None:
+    settings.ensure_layout()
+    settings.api_token_path.write_text("")  # what an interrupted first start could leave behind
+    token = settings.load_api_token()
+    assert len(token) > 20 and settings.load_api_token() == token
+    assert settings.api_token_path.stat().st_mode & 0o777 == 0o600
+
+    app = create_app(settings, key_store=KeyStore(run=FakeKeychain()))
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        app.state.api_token = ""  # even if the token were somehow empty
+        for header in ("Bearer ", "Bearer", ""):
+            assert client.get("/api/agents", headers={"Authorization": header}).status_code == 401
+
+
+def test_saving_settings_keeps_a_symlinked_config_and_its_permissions(settings: Settings, tmp_path: Path) -> None:
+    settings.home.mkdir(parents=True)
+    real = tmp_path / "dotfiles" / "agent-office.yaml"
+    real.parent.mkdir()
+    real.write_text("providers:\n  mine:\n    type: openai-compatible\n    base_url: http://x/v1\n    api_key: s3cret\n")
+    real.chmod(0o600)
+    settings.config_path.symlink_to(real)
+
+    settings.update_user_config(["app", "keep_vms_running_on_quit"], True)
+
+    assert settings.config_path.is_symlink() and settings.config_path.resolve() == real.resolve()
+    assert real.stat().st_mode & 0o777 == 0o600
+    assert settings.load_user_config()["providers"]["mine"]["api_key"] == "s3cret"
+    assert settings.load_user_config()["app"] == {"keep_vms_running_on_quit": True}
+    assert [p.name for p in real.parent.iterdir()] == ["agent-office.yaml"]  # no temp files left
+
+
+def test_checking_for_a_running_backend_changes_nothing(settings: Settings) -> None:
+    assert not is_running(settings)  # no lock file yet, and none is created by looking
+    assert not (settings.home / "backend.lock").exists()
+    held = acquire_instance_lock(settings)
+    recorded = (settings.home / "backend.lock").read_text()
+    assert is_running(settings) and (settings.home / "backend.lock").read_text() == recorded
+    held.close()
+
+
+def test_shutdown_keeps_other_backends_out_until_the_vms_are_off(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend import shutdown
+
+    settings.ensure_layout()
+    init_db(create_db_engine(settings.db_path))
+    seen: list[bool] = []
+
+    async def stop_while_checking(_settings: Settings, vm_manager: Any = None) -> int:
+        seen.append(is_running(settings))  # what a backend starting right now would find
+        return 0
+
+    monkeypatch.setattr(shutdown, "stop_all_vms", stop_while_checking)
+    monkeypatch.setenv("AGENT_OFFICE_HOME", str(settings.home))
+    shutdown.main()
+    assert seen == [True] and not is_running(settings)
