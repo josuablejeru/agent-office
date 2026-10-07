@@ -240,3 +240,53 @@ def test_a_new_agent_can_start_out_restricted(client: Any) -> None:
         "permissions": {"shell": "ask", "files": "ask"}, "unknown_action": "ask"}).json()
     assert created["permissions"]["shell"] == "ask" and created["permissions"]["browser"] == "allow"
     assert created["unknown_action"] == "ask"
+
+
+# --- the two things an agent does without a tool call ----------------------------------------
+
+
+@pytest.mark.parametrize(("level", "recalled"), [("allow", True), ("ask", False), ("off", False)])
+def test_memory_is_only_recalled_for_an_agent_that_may_use_it(tmp_path: Path, level: str, recalled: bool) -> None:
+    from tests.test_runs import FakeGuest
+
+    guests: list[Any] = []
+
+    class RememberingGuest(FakeGuest):
+        def __init__(self, port: int, secret: str) -> None:
+            super().__init__(port, secret)
+            guests.append(self)
+
+        async def call(self, op: str, args: dict[str, Any] | None = None, timeout: float = 30.0) -> dict[str, Any]:
+            if op == "memory.context":
+                self.calls.append(op)
+                return {"facts": [{"id": 1, "subject": "Dana", "note": "Our accountant"}], "databases": []}
+            return await super().call(op, args, timeout)
+
+    provider = ScriptedProvider(ModelResponse(text="ok"))
+    service, engine, agent_id = make_service(tmp_path, provider)
+    service._client_factory = RememberingGuest  # noqa: SLF001
+    set_levels(engine, agent_id, memory=level)
+
+    async def scenario() -> None:
+        service.start(agent_id, "who is Dana?")
+        await service.wait(agent_id)
+
+    asyncio.run(scenario())
+    assert ("Dana: Our accountant" in provider.requests[0][0].content) is recalled
+    assert ("memory.context" in [op for guest in guests for op in guest.calls]) is recalled
+
+
+def test_a_mention_does_not_reach_an_agent_whose_channels_are_off(tmp_path: Path) -> None:
+    from backend.db.models import Run
+    from tests.test_office import ChannelWorld
+
+    world = ChannelWorld(tmp_path)
+    set_levels(world.engine, 1, channels="off")  # alice
+    asyncio.run(world.say("@alice and @bob, status please?"))
+    assert world.transcript() == [
+        ("you", "@alice and @bob, status please?"),
+        ("system", "@alice does not take part in channels (switched off in its permissions)."),
+        ("bob", "On it."),
+    ]
+    with Session(world.engine) as session:
+        assert [run.agent_id for run in session.exec(select(Run)).all()] == [2]

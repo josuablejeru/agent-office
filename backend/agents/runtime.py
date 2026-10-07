@@ -251,7 +251,11 @@ class RunService:
         for name in targets:
             agent = agents[name]
             assert agent.id is not None
-            if await self._vm_manager.status(agent) != VMStatus.RUNNING:
+            if permissions_of(agent)["channels"] == "off":
+                # A mention starts a task and posts its answer without any tool call,
+                # so the Channels setting has to be applied here.
+                note(f"@{name} does not take part in channels (switched off in its permissions).")
+            elif await self._vm_manager.status(agent) != VMStatus.RUNNING:
                 note(f"@{name} is offline. Start its computer to bring it in.")
             elif self.is_busy(agent.id):
                 self._queued_mentions[agent.id] = (message, hops)
@@ -405,7 +409,11 @@ class RunService:
                     raise VMError("The agent's VM has not been started.")
                 tools = tools_for(agent)
                 client = self._client_factory(agent.vm_daemon_port, self._vm_manager.guest_secret(agent))
-                recalled = await self._recall(client, agent, task)
+                # Recall happens before the first tool call, so the Memory setting is
+                # applied here: only an agent that may use its memory freely gets it.
+                recalled = ""
+                if permissions_of(agent)["memory"] == "allow":
+                    recalled = await self._recall(client, agent, task)
                 executor = GuestToolExecutor(
                     client,
                     tools,

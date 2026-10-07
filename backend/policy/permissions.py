@@ -22,8 +22,8 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     ("browser", "Browser", "Open pages, click, type and take screenshots in its Chrome."),
     ("search", "Web search", "Look things up with a search engine."),
     ("databases", "Databases", "Create and change its own tables of data."),
-    ("memory", "Memory", "Remember facts between conversations, and recall them."),
-    ("channels", "Channels", "Read channels and post messages to colleagues."),
+    ("memory", "Memory", "Remember facts between conversations. Only when allowed is it recalled at the start of a task."),
+    ("channels", "Channels", "Read and post in channels. When not allowed, @mentions do not reach it."),
 )
 GROUP_KEYS = tuple(key for key, _, _ in GROUPS)
 GROUP_NAMES = {key: name for key, name, _ in GROUPS}

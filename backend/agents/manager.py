@@ -54,7 +54,7 @@ def agent_to_yaml_dict(agent: Agent) -> dict[str, Any]:
     data["jev"] = {"enabled": agent.jev_enabled, "provider": "jev"}
     data["permissions"] = {
         **permissions_of(agent),
-        "unknown_actions": agent.unknown_action,
+        "unknown_action": agent.unknown_action,
     }
     return data
 
