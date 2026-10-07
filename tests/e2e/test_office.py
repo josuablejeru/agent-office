@@ -251,6 +251,39 @@ def test_each_agent_follows_its_own_permissions(office: Office, team: dict[str, 
     assert shell(office, "alice", alice, "echo back to normal")["stdout"] == "back to normal\n"
 
 
+def test_memory_and_channels_settings_cover_what_happens_without_a_tool_call(
+    office: Office, team: dict[str, int]
+) -> None:
+    alice = team["alice"]
+    (general,) = office.api("GET", "/api/channels").json()
+
+    def channel() -> list[tuple[str, str]]:
+        messages = office.api("GET", f"/api/channels/{general['id']}/messages").json()
+        return [(m["author"], m["content"]) for m in messages]
+
+    # Alice remembers Dana Meier from the memory test. With Memory off, that is not recalled.
+    office.api("PATCH", f"/api/agents/{alice}", json={"permissions": {"memory": "off", "channels": "off"}})
+    office.ask(alice, "what do we know about Dana Meier?")
+    assert "Dana Meier" not in office.model.last_system_prompt("alice").replace("what do we know about Dana Meier?", "")
+    assert "memory_recall" not in {spec["function"]["name"] for spec in office.model.requests["alice"][-1]["tools"]}
+
+    # With Channels off, a mention does not start her, and the channel says why.
+    before, asked = len(channel()), len(office.model.requests["alice"])
+    office.api("POST", f"/api/channels/{general['id']}/messages", json={"content": "@alice are you there?"})
+    office.wait_until(lambda: len(channel()) >= before + 2, 20, "the note in the channel")
+    time.sleep(2)
+    assert channel()[before:] == [
+        ("you", "@alice are you there?"),
+        ("system", "@alice does not take part in channels (switched off in its permissions)."),
+    ]
+    assert len(office.model.requests["alice"]) == asked  # the model was never called
+
+    # Back on: recalled again.
+    office.api("PATCH", f"/api/agents/{alice}", json={"permissions": {"memory": "allow", "channels": "allow"}})
+    office.ask(alice, "what do we know about Dana Meier?")
+    assert "Dana Meier: Our accountant" in office.model.last_system_prompt("alice")
+
+
 def test_turning_a_computer_off_stops_the_agents_task(office: Office, team: dict[str, int]) -> None:
     bob = team["bob"]
     office.model.script("bob", [tool("shell_exec", command="sleep 120"), "never reached"])
