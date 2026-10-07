@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from backend.policy.permissions import Level, UnknownAction
+
+Group = Literal["shell", "files", "browser", "search", "databases", "memory", "channels"]
 
 # The name doubles as the agent's directory name, so it must be a safe slug.
 AGENT_NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,62}$"
@@ -25,6 +30,9 @@ class AgentCreate(BaseModel):
     perm_browser: bool = True
     perm_shell: bool = True
     perm_files: bool = True
+    # Any group left out is allowed (or follows the switches above).
+    permissions: dict[Group, Level] | None = None
+    unknown_action: UnknownAction = "default"
     vm_image: str = Field(default="debian-desktop", pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     vm_memory_mb: int = Field(default=4096, ge=512, le=65536)
     vm_cpus: int = Field(default=4, ge=1, le=32)
@@ -43,6 +51,8 @@ class AgentUpdate(BaseModel):
     perm_browser: bool | None = None
     perm_shell: bool | None = None
     perm_files: bool | None = None
+    permissions: dict[Group, Level] | None = None
+    unknown_action: UnknownAction | None = None
     vm_memory_mb: int | None = Field(default=None, ge=512, le=65536)
     vm_cpus: int | None = Field(default=None, ge=1, le=32)
 
@@ -62,6 +72,9 @@ class AgentRead(BaseModel):
     perm_browser: bool
     perm_shell: bool
     perm_files: bool
+    # Every group with its level.
+    permissions: dict[str, str] = {}
+    unknown_action: str = "default"
     vm_image: str
     vm_memory_mb: int
     vm_cpus: int

@@ -43,11 +43,13 @@ class ScriptedProvider(ModelProvider):
     def __init__(self, *responses: ModelResponse) -> None:
         self._responses = list(responses)
         self.requests: list[list[ChatMessage]] = []
+        self.tools_seen: list[list[ToolSpec]] = []
 
     async def chat(
         self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None
     ) -> ModelResponse:
         self.requests.append(list(messages))
+        self.tools_seen.append(list(tools or []))
         if len(self._responses) > 1:
             return self._responses.pop(0)
         return self._responses[0]

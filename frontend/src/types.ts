@@ -2,6 +2,15 @@ export type VmStatus = "not_created" | "stopped" | "running";
 
 export type Activity = "idle" | "working" | "needs_approval";
 
+export type Level = "allow" | "ask" | "off";
+export type UnknownAction = "default" | "allow" | "ask";
+
+export interface PermissionsInfo {
+  groups: { key: string; name: string; description: string }[];
+  always_asks: string[];
+  app_default: "allow" | "ask";
+}
+
 export interface Agent {
   id: number;
   name: string;
@@ -13,9 +22,8 @@ export interface Agent {
   fallback_provider: string | null;
   fallback_model: string | null;
   jev_enabled: boolean;
-  perm_browser: boolean;
-  perm_shell: boolean;
-  perm_files: boolean;
+  permissions: Record<string, Level>;
+  unknown_action: UnknownAction;
   vm_memory_mb: number;
   vm_cpus: number;
   vm_status: VmStatus;
@@ -31,9 +39,8 @@ export interface AgentCreate {
   provider: string;
   model: string;
   jev_enabled: boolean;
-  perm_browser: boolean;
-  perm_shell: boolean;
-  perm_files: boolean;
+  permissions: Record<string, Level>;
+  unknown_action: UnknownAction;
   vm_memory_mb: number;
   vm_cpus: number;
 }

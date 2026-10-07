@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.logging_config import get_logger
 from backend.policy.actions import PolicyAction, PolicyDecision
+from backend.policy.permissions import GROUP_NAMES, group_of
 from backend.policy.rules import classify
 from backend.providers.base import DecisionProvider, ProviderError
 
@@ -43,6 +44,37 @@ class PolicyEngine:
         arguments: dict[str, Any],
         task: str = "",
         use_decision_provider: bool = False,
+        level: str = "allow",
+        unknown_action: PolicyAction | None = None,
+    ) -> PolicyDecision:
+        """Decide one call. `level` and `unknown_action` are the agent's own settings.
+
+        The agent's settings can only tighten: "off" refuses, "ask" turns anything
+        that would run by itself into an approval, and "allow" changes nothing, so
+        a rule that asks for approval still does.
+        """
+        group = GROUP_NAMES.get(group_of(operation) or "", "This kind of action")
+        if level == "off":
+            return PolicyDecision(
+                action=PolicyAction.REJECT, reason=f"{group} is switched off for this agent.", source="agent"
+            )
+        decision = await self._decide(operation, arguments, task, use_decision_provider, unknown_action)
+        if level == "ask" and decision.action == PolicyAction.ALLOW:
+            return PolicyDecision(
+                action=PolicyAction.REQUIRE_APPROVAL,
+                risk=decision.risk,
+                reason=f"You chose to confirm every action of the kind \"{group}\" for this agent.",
+                source="agent",
+            )
+        return decision
+
+    async def _decide(
+        self,
+        operation: str,
+        arguments: dict[str, Any],
+        task: str,
+        use_decision_provider: bool,
+        unknown_action: PolicyAction | None,
     ) -> PolicyDecision:
         verdict = classify(operation, arguments)
         if verdict.action is not None:
@@ -53,7 +85,13 @@ class PolicyEngine:
             decision = await self._ask_provider(operation, arguments, task)
             if decision is not None:
                 return decision
+        if unknown_action is not None:
+            return PolicyDecision(action=unknown_action, source="agent")
         return PolicyDecision(action=self._default_action, source="default")
+
+    @property
+    def default_action(self) -> PolicyAction:
+        return self._default_action
 
     async def _ask_provider(
         self, operation: str, arguments: dict[str, Any], task: str

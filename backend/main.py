@@ -109,11 +109,14 @@ def create_app(
     def provider_factory(name: str, config: ProviderSettings, model: str) -> ModelProvider:
         return build_provider(name, config, model, key_store.get)
 
+    policy = build_policy_engine(settings)
+    # "allow" or "ask": what the Permissions page shows as the app-wide default.
+    app.state.policy_default = "ask" if policy.default_action == "require_approval" else "allow"
     app.state.run_service = RunService(
         engine,
         settings,
         app.state.vm_manager,
-        build_policy_engine(settings),
+        policy,
         app.state.approvals,
         provider_factory=provider_factory,
         channels=app.state.channels,

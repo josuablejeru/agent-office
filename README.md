@@ -201,6 +201,12 @@ Settings shows the internal domains currently in effect.
 
 ## Policy
 
+Each agent has a **Permissions** tab: per kind of tool (run commands, files,
+browser, web search, databases, memory, channels) choose *Allowed*, *Ask me
+first* or *Not allowed*. These can only restrict: the built-in rules below
+still ask for approval whatever is chosen. With "Run commands" allowed an agent
+can do most things through the shell, so restrict that first to confine one.
+
 Every tool call passes the policy engine (`backend/policy/`) before it runs.
 
 - **Hardcoded rules decide first and cannot be overridden.** Read-only

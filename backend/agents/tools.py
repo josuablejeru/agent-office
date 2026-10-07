@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from backend.db.models import Agent
+from backend.policy.permissions import permissions_of
 from backend.providers.base import ToolCallRequest, ToolSpec
 from backend.vm.guest import GuestClient, GuestError
 from backend.vm.transfer import OUTDATED_DAEMON
@@ -116,7 +117,7 @@ ALL_TOOLS: list[AgentTool] = [
     ),
     AgentTool(
         operation="browser.search",
-        permission="browser",
+        permission="search",
         spec=ToolSpec(
             name="web_search",
             description=(
@@ -259,7 +260,7 @@ ALL_TOOLS: list[AgentTool] = [
     ),
     AgentTool(
         operation="db.sql",
-        permission="memory",
+        permission="databases",
         spec=ToolSpec(
             name="db_sql",
             description=(
@@ -346,14 +347,9 @@ def store_screenshot(result: dict[str, Any], directory: Path) -> dict[str, Any]:
 
 
 def tools_for(agent: Agent) -> list[AgentTool]:
-    enabled = {
-        "shell": agent.perm_shell,
-        "files": agent.perm_files,
-        "browser": agent.perm_browser,
-        "channels": True,
-        "memory": True,
-    }
-    return [tool for tool in ALL_TOOLS if enabled.get(tool.permission, False)]
+    """The tools offered to the model: everything not switched off for this agent."""
+    levels = permissions_of(agent)
+    return [tool for tool in ALL_TOOLS if levels.get(tool.permission, "off") != "off"]
 
 
 class GuestToolExecutor:

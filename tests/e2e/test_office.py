@@ -226,6 +226,31 @@ def test_the_browser_copes_with_an_awkward_page(office: Office, team: dict[str, 
     assert clicked["url"].endswith("/done.html") and clicked["title"] == "Done"  # waited for the page to change
 
 
+def test_each_agent_follows_its_own_permissions(office: Office, team: dict[str, int]) -> None:
+    alice, bob = team["alice"], team["bob"]
+    office.api("PATCH", f"/api/agents/{alice}", json={"permissions": {"shell": "ask", "browser": "off"}})
+
+    # "Ask me first": even a harmless command waits for the user.
+    office.model.script("alice", [tool("shell_exec", command="echo harmless"), "done"])
+    run_id = office.send(alice, "say something")
+    office.wait_until(lambda: office.run(run_id)["pending_approval"] is not None, 30, "the approval request")
+    assert "confirm every action" in office.run(run_id)["pending_approval"]["reason"]
+    office.api("POST", f"/api/approvals/{office.run(run_id)['pending_approval']['id']}", json={"approved": True})
+    assert result(office.finished(run_id, 30))["stdout"] == "harmless\n"
+
+    # "Not allowed": the model is not offered the tool, and is refused if it calls it anyway.
+    offered = {spec["function"]["name"] for spec in office.model.requests["alice"][-1]["tools"]}
+    assert "shell_exec" in offered and not {name for name in offered if name.startswith("browser_")}
+    office.model.script("alice", [tool("browser_goto", url="https://example.com"), "done"])
+    refused = office.ask(alice)
+    assert calls(refused)[0][1] == "blocked" and "error" in result(refused, 0)
+
+    # The colleague next door is unaffected.
+    assert shell(office, "bob", bob, "echo free")["stdout"] == "free\n"
+    office.api("PATCH", f"/api/agents/{alice}", json={"permissions": {"shell": "allow", "browser": "allow"}})
+    assert shell(office, "alice", alice, "echo back to normal")["stdout"] == "back to normal\n"
+
+
 def test_turning_a_computer_off_stops_the_agents_task(office: Office, team: dict[str, int]) -> None:
     bob = team["bob"]
     office.model.script("bob", [tool("shell_exec", command="sleep 120"), "never reached"])

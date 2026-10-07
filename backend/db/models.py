@@ -27,6 +27,11 @@ class Agent(SQLModel, table=True):
     perm_browser: bool = True
     perm_shell: bool = True
     perm_files: bool = True
+    # Level per kind of tool as JSON ("allow", "ask", "off"); see backend/policy/permissions.py.
+    # Empty until chosen: the switches above then say what applies.
+    permissions_json: str = ""
+    # Actions no safety rule covers: "default" (the app's setting), "allow" or "ask".
+    unknown_action: str = "default"
     vm_image: str = "debian-desktop"
     vm_memory_mb: int = 4096
     vm_cpus: int = 4

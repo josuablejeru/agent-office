@@ -6,6 +6,7 @@ import type {
   ChannelMessage,
   DnsStatus,
   MemoryView,
+  PermissionsInfo,
   ModelCheck,
   ModelStatus,
   SharedFile,
@@ -78,6 +79,7 @@ const post = (body?: unknown): RequestInit => ({
 export const api = {
   listAgents: () => request<Agent[]>("/api/agents"),
   createAgent: (payload: AgentCreate) => request<Agent>("/api/agents", post(payload)),
+  describePermissions: () => request<PermissionsInfo>("/api/agents/permissions"),
   updateAgent: (id: number, payload: AgentUpdate) =>
     request<Agent>(`/api/agents/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteAgent: (id: number) =>

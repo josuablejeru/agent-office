@@ -13,6 +13,7 @@ from backend.agents.models import AgentCreate, AgentUpdate
 from backend.config import Settings
 from backend.db.models import Agent, Approval, Message, Run, ToolCall
 from backend.logging_config import get_logger
+from backend.policy.permissions import permissions_of, store_permissions
 from backend.vm.ports import allocate_daemon_port, is_port_free
 
 log = get_logger("agents")
@@ -52,9 +53,8 @@ def agent_to_yaml_dict(agent: Agent) -> dict[str, Any]:
         }
     data["jev"] = {"enabled": agent.jev_enabled, "provider": "jev"}
     data["permissions"] = {
-        "browser": agent.perm_browser,
-        "shell": agent.perm_shell,
-        "files": agent.perm_files,
+        **permissions_of(agent),
+        "unknown_actions": agent.unknown_action,
     }
     return data
 
@@ -80,7 +80,10 @@ class AgentManager:
         if existing is not None or agent_dir.exists():
             raise AgentAlreadyExists(f"agent '{payload.name}' already exists")
 
-        agent = Agent(**payload.model_dump(), vm_disk_path=str(agent_dir / "disk.qcow2"))
+        fields = payload.model_dump()
+        levels = fields.pop("permissions") or {}
+        agent = Agent(**fields, vm_disk_path=str(agent_dir / "disk.qcow2"))
+        store_permissions(agent, levels)
         (agent_dir / "logs").mkdir(parents=True)
         self._session.add(agent)
         self._session.commit()
@@ -92,9 +95,19 @@ class AgentManager:
     def update(self, agent_id: int, payload: AgentUpdate) -> Agent:
         agent = self.get(agent_id)
         changes = payload.model_dump(exclude_unset=True)
+        levels = changes.pop("permissions", None) or {}
+        if changes.get("unknown_action", "") is None:
+            del changes["unknown_action"]
+        # The older on/off switches, when sent alone, still mean what they say.
+        for group, switch in (("shell", "perm_shell"), ("files", "perm_files"), ("browser", "perm_browser")):
+            if switch in changes and group not in levels and changes[switch] is not None:
+                if changes[switch] != (permissions_of(agent)[group] != "off"):
+                    levels[group] = "allow" if changes[switch] else "off"
         self._check_providers(changes.get("provider"), changes.get("fallback_provider"))
         for key, value in changes.items():
             setattr(agent, key, value)
+        if levels:
+            store_permissions(agent, levels)
         self._session.add(agent)
         self._session.commit()
         self._session.refresh(agent)

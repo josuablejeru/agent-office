@@ -1,6 +1,7 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { Avatar } from "./Avatar";
+import { Permissions } from "./Permissions";
 import { ModelTest } from "./ModelTest";
 import { CUSTOM_AVATAR, PERSONAS, personaFor } from "./personas";
 import type { Agent, AgentCreate, Provider } from "./types";
@@ -15,6 +16,7 @@ interface Props {
   onSaved: (agent: Agent) => Promise<void> | void;
   onDeleted?: () => Promise<void> | void;
   onCleared?: () => void;
+  initialTab?: "profile" | "permissions";
 }
 
 /** Prefer a model server on this machine: it needs no key and keeps data local. */
@@ -50,6 +52,7 @@ export function AgentForm({
   onSaved,
   onDeleted,
   onCleared,
+  initialTab = "profile",
 }: Props) {
   const [form, setForm] = useState<AgentCreate>({
     name: agent?.name ?? "",
@@ -60,15 +63,15 @@ export function AgentForm({
     fallback_provider: agent?.fallback_provider ?? null,
     fallback_model: agent?.fallback_model ?? null,
     jev_enabled: agent?.jev_enabled ?? false,
-    perm_browser: agent?.perm_browser ?? true,
-    perm_shell: agent?.perm_shell ?? true,
-    perm_files: agent?.perm_files ?? true,
+    permissions: agent?.permissions ?? {},
+    unknown_action: agent?.unknown_action ?? "default",
     vm_memory_mb: agent?.vm_memory_mb ?? 4096,
     vm_cpus: agent?.vm_cpus ?? 4,
   });
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
+  const [tab, setTab] = useState<"profile" | "permissions">(initialTab);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -119,6 +122,12 @@ export function AgentForm({
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!form.name || !form.model) {
+      // These fields live on the other tab, where the browser cannot point at them.
+      setTab("profile");
+      setError("Give the agent a name and a model first.");
+      return;
+    }
     void guarded(async () => {
       const payload = {
         ...form,
@@ -175,8 +184,31 @@ export function AgentForm({
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="modal wide" onSubmit={handleSubmit}>
-        <h2>{agent ? "Agent settings" : "New agent"}</h2>
+        <h2>{agent ? `Settings for ${agent.name}` : "New agent"}</h2>
+        <div className="tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === "profile"} onClick={() => setTab("profile")}>
+            Profile
+          </button>
+          <button type="button" role="tab" aria-selected={tab === "permissions"} onClick={() => setTab("permissions")}>
+            Permissions
+          </button>
+        </div>
 
+        {tab === "permissions" && (
+          <Permissions
+            levels={form.permissions}
+            unknownAction={form.unknown_action}
+            jevEnabled={form.jev_enabled}
+            onLevel={(group, level) =>
+              setForm((current) => ({ ...current, permissions: { ...current.permissions, [group]: level } }))
+            }
+            onUnknownAction={(value) => set("unknown_action", value)}
+            onJev={(enabled) => set("jev_enabled", enabled)}
+          />
+        )}
+
+        {tab === "profile" && (
+        <>
         <div className="persona-grid" role="radiogroup" aria-label="Character">
           {PERSONAS.map((persona) => (
             <button
@@ -328,31 +360,11 @@ export function AgentForm({
                 />
               </label>
             </div>
-            <fieldset className="toggles">
-              <legend>The agent may use</legend>
-              {(
-                [
-                  ["perm_browser", "Browser"],
-                  ["perm_shell", "Shell"],
-                  ["perm_files", "Files"],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="toggle">
-                  <input type="checkbox" checked={form[key]} onChange={(e) => set(key, e.target.checked)} />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={form.jev_enabled}
-                onChange={(e) => set("jev_enabled", e.target.checked)}
-              />
-              Ask Jev about actions no built-in safety rule covers
-            </label>
             {agent && <p className="hint">Memory and CPU changes apply the next time the computer starts.</p>}
           </>
+        )}
+
+        </>
         )}
 
         {error && <p className="form-error">{error}</p>}

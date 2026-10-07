@@ -23,9 +23,10 @@ from backend.config import ProviderSettings, Settings
 from backend.db.models import Agent, Approval, ChannelMessage, Message, Run, ToolCall, utcnow
 from backend.logging_config import get_logger
 from backend.notify import Notifier
-from backend.policy.actions import PolicyDecision
+from backend.policy.actions import PolicyAction, PolicyDecision
 from backend.policy.approvals import ApprovalBroker
 from backend.policy.engine import PolicyEngine
+from backend.policy.permissions import group_of, permissions_of, unknown_action_of
 from backend.providers.base import ChatMessage, ModelProvider, ProviderError, ToolCallRequest
 from backend.providers.registry import FallbackProvider, build_provider
 from backend.vm.errors import VMError
@@ -383,11 +384,20 @@ class RunService:
                 "run started",
                 extra={"run": run_id, "agent": agent.name, "provider": agent.provider, "model": agent.model},
             )
-            use_jev = agent.jev_enabled
+            agent_id = agent.id
 
             async def evaluate(operation: str, arguments: dict[str, Any]) -> PolicyDecision:
+                # Read for every call: a setting changed while the agent works
+                # applies to its very next action.
+                with Session(self._engine) as fresh:
+                    current = fresh.get(Agent, agent_id)
+                    if current is None:
+                        return PolicyDecision(action=PolicyAction.REJECT, reason="This agent was deleted.")
+                    level = permissions_of(current).get(group_of(operation) or "", "allow")
+                    use_jev, unknown = current.jev_enabled, unknown_action_of(current)
                 return await self._policy.evaluate(
-                    operation, arguments, task=task, use_decision_provider=use_jev
+                    operation, arguments, task=task, use_decision_provider=use_jev,
+                    level=level, unknown_action=unknown,
                 )
 
             try:

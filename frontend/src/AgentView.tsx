@@ -32,7 +32,7 @@ export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, on
   const [modelProblem, setModelProblem] = useState<string | null>(null);
   // Which side panel is open next to the chat.
   const [panel, setPanel] = useState<"computer" | "files" | "memory" | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"profile" | "permissions" | null>(null);
   // Changed to make the chat start afresh, after the conversation was cleared.
   const [chatEpoch, setChatEpoch] = useState(0);
   const running = agent.vm_status === "running";
@@ -126,7 +126,8 @@ export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, on
           <button disabled={!running} onClick={() => setPanel(panel === "memory" ? null : "memory")}>
             {panel === "memory" ? "Close memory" : "Memory"}
           </button>
-          <button onClick={() => setSettingsOpen(true)}>Settings</button>
+          <button onClick={() => setSettingsTab("permissions")}>Permissions</button>
+          <button onClick={() => setSettingsTab("profile")}>Agent settings</button>
         </div>
       </header>
       {error && <div className="notice error">{error}</div>}
@@ -140,23 +141,24 @@ export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, on
         {panel === "memory" && running && <MemoryPanel agent={agent} />}
       </div>
 
-      {settingsOpen && (
+      {settingsTab && (
         <AgentForm
+          initialTab={settingsTab}
           agent={agent}
           providers={providers}
           avatarVersion={avatarVersion}
           onAvatarChanged={onAvatarChanged}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setSettingsTab(null)}
           onSaved={async () => {
-            setSettingsOpen(false);
+            setSettingsTab(null);
             await onChanged();
           }}
           onCleared={() => {
-            setSettingsOpen(false);
+            setSettingsTab(null);
             setChatEpoch((epoch) => epoch + 1);
           }}
           onDeleted={async () => {
-            setSettingsOpen(false);
+            setSettingsTab(null);
             await onChanged();
           }}
         />
