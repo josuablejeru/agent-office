@@ -13,8 +13,9 @@
 >   there on reopening.
 > - A copy of the real database migrated with the existing agent unchanged.
 >
-> Not checked: nothing known. The installed app bundle itself was only launched and cycled, not
-> clicked through; it runs the same UI files as the window test.
+> Not checked: the installed app bundle itself was only launched and cycled, not clicked
+> through (it runs the same UI files as the window test); the tab with the Jev switch on, since
+> no Jev service exists here.
 
 **For:** you, giving different agents different amounts of trust: a research agent that may
 browse but not run commands, a new agent that asks before everything.
