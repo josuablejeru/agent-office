@@ -18,9 +18,9 @@ jobs:
       HAVE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
       HAVE_NOTARY_KEY: ${{ secrets.NOTARY_KEY_P8 != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm

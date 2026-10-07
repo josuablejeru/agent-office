@@ -69,7 +69,7 @@ any other app. It starts the backend itself and shows the UI in its own window.
 
     uv run python -m backend.app     # the app's window without building the bundle
     uv run pytest
-    uvx ruff check backend guest tests scripts
+    uv run ruff check backend guest tests scripts
     uv run python -m backend.vm.capabilities   # exits 0 when QEMU, HVF and firmware are present
 
 Only one backend may use a data directory at a time; a second one refuses to

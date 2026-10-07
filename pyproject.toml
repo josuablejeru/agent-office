@@ -18,7 +18,10 @@ dependencies = [
 app = [
     "pywebview>=6.2.1",
 ]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.16,<0.17",
+]
 
 [tool.uv]
 package = false
@@ -38,4 +41,5 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
 # ASYNC109: a `timeout` argument is the natural API for guest and subprocess calls here.
-ignore = ["E501", "B008", "ASYNC109", "UP038"]
+# ASYNC240: checking or removing a small local file does not hold the loop up noticeably.
+ignore = ["E501", "B008", "ASYNC109", "ASYNC240"]
