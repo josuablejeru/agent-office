@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="Agent Office"
 EXECUTABLE="agent-office"
-BUNDLE_ID="local.agent-office.app"
+BUNDLE_ID="com.josuablejeru.agent-office"
 PYTHON_VERSION="3.12"
 VERSION="${APP_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)}"
 BUILD_DIR="dist"
