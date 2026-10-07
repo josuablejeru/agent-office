@@ -15,6 +15,8 @@ other. Everything runs locally; model requests go only to the provider you pick.
 | Long-term memory (facts with links, recalled automatically) and SQLite databases per agent | working |
 | Chat, run limits, stop button, conversation clearing | working |
 | Safety rules with approval dialog (allow once / reject) | working |
+| Permissions per agent: allowed, ask first or not allowed for each kind of tool | working |
+| Split DNS, so agents resolve VPN-internal names like the Mac does | working with a stand-in server; not tried on a real VPN |
 | Shared channels, `@mention` hand-offs between agents | working |
 | Characters with drawn avatars, or a photo of your own | working |
 | Desktop view (noVNC) with take control / return control | working |
@@ -67,7 +69,8 @@ found again on the next start.
 
 1. **New agent.** Pick a character (or upload a photo), a provider and a
    model, and adjust the job description. Under "More options": a fallback
-   model, memory and CPUs, and which tools the agent may use.
+   model, memory and CPUs. The Permissions tab sets what the agent may do
+   (see [Policy](#policy)).
 2. **Turn on its computer.** The first start creates the agent's disk; later
    starts boot the same disk, so files, installed software and browser logins
    persist.
@@ -80,14 +83,16 @@ found again on the next start.
    to put results there.
 5. **Memory.** An agent saves what is worth knowing later (people,
    preferences, decisions) and is shown the relevant entries at the start of
-   every task, so it still knows them after you clear the conversation or
-   restart its computer. Entries can link things ("Dana - works at - Acme"),
+   every task (unless Memory is not set to "Allowed" in its permissions), so
+   it still knows them after you clear the conversation or restart its
+   computer. Entries can link things ("Dana - works at - Acme"),
    and asking about one thing also brings up what it is linked to. The Memory
    panel shows, searches, adds and removes entries. Agents can also keep their
    own SQLite databases (under `~/Databases` on their computer) for lists and
    records; the panel shows their tables and row counts.
-6. **Approvals.** A destructive action pauses the run and shows the exact
-   command, the risk and the reason. The sidebar marks agents that are waiting
+6. **Approvals.** A destructive action, or any action of a kind you set to
+   "Ask me first", pauses the run and shows the exact command, the risk and
+   the reason. The sidebar marks agents that are waiting
    for you, the Dock icon shows how many are waiting, and it bounces if the
    app is in the background. It bounces once when a task finishes.
 7. **Open computer.** Watch the agent's desktop. **Take control** gives you
@@ -96,7 +101,8 @@ found again on the next start.
    `@name` to ask an agent to act; its answer is posted there. Agents can read
    and post to channels themselves and hand work to each other with `@name`.
    A chain of hand-offs stops after three steps so agents cannot keep each
-   other busy indefinitely. An agent needs its computer on to respond.
+   other busy indefinitely. An agent needs its computer on to respond, and
+   Channels must not be switched off in its permissions.
 
 ### Characters and photos
 
@@ -131,6 +137,8 @@ Nothing in the app is tied to a particular model.
         project: my-gcp-project
         region: global
 
+- Saving from the Settings dialog rewrites `config.yaml`: values are kept,
+  comments in the file are not.
 - Setting a provider to `null` in `config.yaml` (for example `openai: null`)
   hides a built-in one you do not use.
 - **OpenAI-compatible servers** can be added from Settings ("Add a model
@@ -201,11 +209,22 @@ Settings shows the internal domains currently in effect.
 
 ## Policy
 
-Each agent has a **Permissions** tab: per kind of tool (run commands, files,
-browser, web search, databases, memory, channels) choose *Allowed*, *Ask me
-first* or *Not allowed*. These can only restrict: the built-in rules below
-still ask for approval whatever is chosen. With "Run commands" allowed an agent
-can do most things through the shell, so restrict that first to confine one.
+Each agent has a **Permissions** tab (also a button on the agent page). Per
+kind of tool (run commands, files, browser, web search, databases, memory,
+channels) choose:
+
+- **Allowed**: runs by itself, except where a built-in rule asks for approval.
+- **Ask me first**: every action of that kind waits for your approval.
+- **Not allowed**: the agent is not offered the tool, and a call to it is
+  refused. For Memory this also stops the automatic recall; for Channels it
+  also stops `@mentions` from reaching the agent.
+
+These can only restrict: the built-in rules below still ask for approval
+whatever is chosen. A change applies to the agent's next action, even in the
+middle of a task. With "Run commands" allowed an agent can do most things
+through the shell (read files, fetch pages), so restrict that first to confine
+one. The settings govern the agent's tools; they do not limit what programs on
+its computer can reach on your network.
 
 Every tool call passes the policy engine (`backend/policy/`) before it runs.
 
@@ -216,15 +235,18 @@ Every tool call passes the policy engine (`backend/policy/`) before it runs.
   passwords, and piping a download into a shell. In an agent's databases:
   dropping a table, and deleting or updating every row. The rules look through
   `sudo`, `env`, `bash -c`, pipes, `&&`, `;` and command substitution.
-- **Everything else** follows `policy.default_action`: `allow` (default; the
-  agent acts inside its own computer) or `require_approval`.
+- **Everything else** follows the agent's own setting on its Permissions tab
+  ("Anything the safety rules do not recognise"), or else the app-wide
+  `policy.default_action`: `allow` (default; the agent acts inside its own
+  computer) or `require_approval`.
 - **Jev**, when configured (`jev: {base_url: ..., api_key_env: ...}`) and
   enabled for an agent, is asked only about calls no rule decides. The adapter
   posts `{"state", "questions"}` to `{base_url}/decide` and expects
   `{"answers"}`; that contract is an assumption.
 
-Not covered: what an agent does inside web pages, and scripts it writes and
-runs when the default action is `allow`.
+Not covered by the built-in rules: what an agent does inside web pages (set
+Browser to "Ask me first" to confirm each step), and scripts it writes and
+runs when unrecognised actions are allowed.
 
 ## Security model
 
@@ -243,6 +265,11 @@ runs when the default action is `allow`.
   provider; with a hosted provider, avoid having agents remember secrets.
 - **Web content and channel messages are untrusted input** to an agent. The
   approval rules apply to whatever it then attempts.
+- **Images in an agent's replies are not loaded.** They are shown as
+  `[image: ...]`, so a manipulated agent cannot leak text through an image
+  address. Text typed into password fields is never shown to the model.
+- **Agents are separate.** Each has its own computer, disk, browser profile
+  and memory; nothing is shared between them except channels.
 
 ## Data
 
@@ -275,7 +302,9 @@ To uninstall: delete `/Applications/Agent Office.app`,
 | "paused because the Mac's disk is almost full" | Free up space, then turn the computer off and on |
 | "This agent's computer is running an older version of its software" | Turn the computer off and on; it picks up the current tools at start |
 | A website shows the agent a CAPTCHA | Open computer, Take control, pass the check, Return control. Agents are told not to try themselves. |
-| An agent does not answer in a channel | Its computer must be on, and it must not be busy with another task |
+| An agent does not answer in a channel | Its computer must be on, it must not be busy with another task, and Channels must not be "Not allowed" in its permissions |
+| An agent keeps asking for approval for harmless things | Its Permissions tab has that kind of action on "Ask me first" |
+| A task stalls for a long time and then fails | The Mac went to sleep: agents and their computers pause with it. Keep the Mac awake (plugged in, lid open) for long tasks. |
 | A model server on your network works from Terminal but not from the app | System Settings › Privacy & Security › Local Network: allow Agent Office. macOS may ask again after the app is rebuilt. |
 | An internal hostname does not resolve on an agent's computer | Settings › Network should list the domain while the VPN is connected. If not, add it under `network.dns_rules`. Turn the agent's computer off and on once after updating the app. |
 | The app says it is already running | Quit the other copy, or a `start-dev.sh` session |
