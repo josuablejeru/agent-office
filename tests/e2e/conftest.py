@@ -277,4 +277,7 @@ def office(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Office]:
             os.kill(pid, signal.SIGKILL)
         model.close()
         internal_dns.close()
-        shutil.rmtree(home, ignore_errors=True)
+        if os.environ.get("AGENT_OFFICE_E2E_KEEP") == "1":
+            print(f"\ntest data kept for inspection: {home}")
+        else:
+            shutil.rmtree(home, ignore_errors=True)

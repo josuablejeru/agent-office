@@ -55,7 +55,8 @@ def test_looks_something_up_on_the_web(office: Office, worker: int) -> None:
     run = ask(office, worker, "Find the phone number of Parasail Maui at Kaanapali Beach and tell me where you found it.")
     assert run["status"] == "completed", run["error"]
     assert "browser.search" in tools_used(run)
-    assert not any((call["result"] or {}).get("blocked") for call in run["tool_calls"])  # no bot check
+    # A site may show a bot check; the search itself must not, and the agent must get past the dead end.
+    assert not any((call["result"] or {}).get("blocked") for call in run["tool_calls"] if call["tool"] == "browser.search")
     assert re.search(r"\(?\d{3}\)?[ -.]\d{3}[ -.]\d{4}", run["reply"]), run["reply"]
 
 
