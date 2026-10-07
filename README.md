@@ -25,6 +25,17 @@ other. Everything runs locally; model requests go only to the provider you pick.
 | Jev decision provider | adapter against an assumed HTTP contract; not verified against a real Jev |
 | macOS app with bundled Python, Keychain key storage, in-app setup | working |
 
+## Install
+
+Download the latest `Agent-Office-…-macos-arm64.zip` from
+[Releases](https://github.com/josuablejeru/agent-office/releases), unzip it and
+move *Agent Office* to Applications. You also need QEMU: `brew install qemu`.
+
+Each release says how it was signed. A release that is not signed with an
+Apple Developer ID and notarized is blocked by macOS when downloaded; build it
+yourself instead (`scripts/build-app.sh`), or remove the download mark with
+`xattr -dr com.apple.quarantine "/Applications/Agent Office.app"`.
+
 ## Requirements
 
 - Apple Silicon Mac, macOS 13 or later
@@ -311,6 +322,29 @@ To uninstall: delete `/Applications/Agent Office.app`,
 
 API reference: run from source and open http://127.0.0.1:8000/docs.
 
+## Releases
+
+Pushing a tag publishes a release with the app attached
+(`.github/workflows/release.yml`):
+
+    git tag v0.2.0 && git push origin v0.2.0
+
+A tag with a suffix, such as `v0.2.0-rc1`, becomes a pre-release. The app is
+signed and notarized when these repository secrets exist, and ad-hoc signed
+otherwise:
+
+| Secret | What it is |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | A *Developer ID Application* certificate with its private key, exported as .p12 and base64-encoded (`base64 -i cert.p12 \| pbcopy`) |
+| `MACOS_CERTIFICATE_PASSWORD` | The password chosen when exporting the .p12 |
+| `NOTARY_KEY_P8` | The contents of an App Store Connect API key file (`AuthKey_….p8`) |
+| `NOTARY_KEY_ID` | That key's ID |
+| `NOTARY_ISSUER_ID` | The issuer ID shown above the key list in App Store Connect |
+
+Set each with `gh secret set NAME`. To sign a local build the same way:
+`SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh`
+(see `scripts/sign-and-notarize.sh`).
+
 ## Tests
 
 ```sh
@@ -323,3 +357,7 @@ AGENT_OFFICE_E2E=1 AGENT_OFFICE_E2E_MODEL=ollama/qwen3:8b \
 The end-to-end tests start their own backend and agent computers in a throwaway
 directory, with a scripted stand-in for the model. They need the base image and
 do not touch your agents.
+
+## License
+
+[GNU Affero General Public License v3.0](LICENSE).

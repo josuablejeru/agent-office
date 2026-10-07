@@ -31,7 +31,7 @@ before the next starts.
 
 ## Evidence
 
-The first real task, "get me the phone number for kanapali parasailing on maui", was cancelled
+The first real task, a request to look up a local business's phone number, was cancelled
 after two minutes:
 
 1. The agent opened a Google search and got Google's "unusual traffic" page.
@@ -157,7 +157,7 @@ be produced here: a wrong address, a missing key, a model that does not exist, a
 - **Version control.** This project has no git repository; one bad edit or a deleted folder loses
   everything. My recommendation: `git init` and a first commit now. I have not done it because
   you did not ask.
-- **Trying Vertex.** Google Cloud credentials exist on this Mac. My recommendation: after task 3,
+- **Trying Vertex.** My recommendation: after task 3,
   enter your project in Settings and press Test yourself; I will not use those credentials.
 - **Rebuilding the app.** The new features reach the app only after `scripts/build-app.sh`, which
   replaces the running copy. My recommendation: quit the app when you are at a stopping point and

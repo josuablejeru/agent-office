@@ -9,6 +9,9 @@
 # Usage: scripts/build-app.sh            build and install
 #        INSTALL_DIR=~/Applications scripts/build-app.sh
 #        INSTALL_DIR= scripts/build-app.sh   build only (dist/Agent Office.app)
+#        APP_VERSION=1.2.3 ...               version shown by macOS (default: pyproject.toml)
+#        SIGN_IDENTITY="Developer ID Application: ..." ...   sign for distribution
+#                                            (see scripts/sign-and-notarize.sh)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,7 +19,7 @@ APP_NAME="Agent Office"
 EXECUTABLE="agent-office"
 BUNDLE_ID="local.agent-office.app"
 PYTHON_VERSION="3.12"
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
+VERSION="${APP_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)}"
 BUILD_DIR="dist"
 APP="$BUILD_DIR/$APP_NAME.app"
 RES="$APP/Contents/Resources"
@@ -145,8 +148,12 @@ if find "$APP" -type l -exec readlink {} + | /usr/bin/grep -q '^/'; then
   die "the bundle contains links to files outside itself"
 fi
 
-# Ad-hoc signature: enough for an app built and run on the same Mac.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "    (codesign skipped)"
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  scripts/sign-and-notarize.sh "$APP"
+else
+  # Ad-hoc signature: enough for an app built and run on the same Mac.
+  codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "    (codesign skipped)"
+fi
 
 echo "==> Built $APP ($(du -sh "$APP" | cut -f1))"
 if [ -n "$INSTALL_DIR" ]; then

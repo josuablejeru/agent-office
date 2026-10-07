@@ -1,0 +1,108 @@
+name: Release
+
+# Push a tag like v0.2.0 to publish a release with the app attached.
+# A tag with a suffix (v0.2.0-rc1) is published as a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      # Signing is used when these repository secrets exist; without them the
+      # app is ad-hoc signed and macOS will warn when a downloaded copy is opened.
+      HAVE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      HAVE_NOTARY_KEY: ${{ secrets.NOTARY_KEY_P8 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Tests
+        run: |
+          uv sync --group app --group dev
+          uv run pytest -q
+
+      - name: Import the signing certificate
+        if: env.HAVE_CERTIFICATE == 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' | head -1)"
+          [ -n "$IDENTITY" ] || { echo "::error::the certificate is not a Developer ID Application certificate"; exit 1; }
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Prepare the notarization key
+        if: env.HAVE_CERTIFICATE == 'true' && env.HAVE_NOTARY_KEY == 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+          echo "NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+
+      - name: Build
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # macOS wants a plain x.y.z; the full tag stays in the file name.
+          INSTALL_DIR= APP_VERSION="${VERSION%%-*}" scripts/build-app.sh
+          cd dist
+          ditto -c -k --keepParent "Agent Office.app" "Agent-Office-$VERSION-macos-arm64.zip"
+          shasum -a 256 "Agent-Office-$VERSION-macos-arm64.zip" > "Agent-Office-$VERSION-macos-arm64.zip.sha256"
+          cat "Agent-Office-$VERSION-macos-arm64.zip.sha256"
+
+      - name: Describe how it was signed
+        id: signing
+        run: |
+          if [ -n "${NOTARY_KEY_PATH:-}" ]; then
+            echo "note=Signed with a Developer ID and notarized by Apple: open it like any other app." >> "$GITHUB_OUTPUT"
+          elif [ -n "${SIGN_IDENTITY:-}" ]; then
+            echo "note=Signed with a Developer ID but **not notarized**: macOS will warn on first open (right-click the app and choose Open)." >> "$GITHUB_OUTPUT"
+          else
+            echo "note=**Not signed with a Developer ID.** macOS will refuse to open a downloaded copy. Either build it yourself with \`scripts/build-app.sh\`, or after unzipping run \`xattr -dr com.apple.quarantine \"Agent Office.app\"\`." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_NOTE: ${{ steps.signing.outputs.note }}
+        run: |
+          PRERELEASE=""
+          case "$GITHUB_REF_NAME" in *-*) PRERELEASE="--prerelease" ;; esac
+          {
+            echo "**Requirements:** Apple Silicon Mac, macOS 13 or later, and QEMU (\`brew install qemu\`)."
+            echo
+            echo "**Install:** download the zip, unzip it, and move *Agent Office* to Applications."
+            echo
+            echo "$SIGNING_NOTE"
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/Agent-Office-*.zip dist/Agent-Office-*.sha256 \
+            --title "Agent Office ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" \
+            --generate-notes $PRERELEASE
+
+      - name: Remove the signing keychain
+        if: always() && env.HAVE_CERTIFICATE == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true

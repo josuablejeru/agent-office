@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and lint
+    runs-on: macos-15   # Apple Silicon, like the Macs the app runs on
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Python tests
+        run: |
+          uv sync --group app --group dev
+          uv run pytest -q
+      - name: Lint
+        run: uvx ruff check backend guest tests scripts
+      - name: UI type check and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
+
+  build:
+    name: Build the app
+    runs-on: macos-15
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build (not installed, ad-hoc signed)
+        run: INSTALL_DIR= scripts/build-app.sh
+      - name: The bundled Python starts and finds the backend
+        run: |
+          RES="dist/Agent Office.app/Contents/Resources"
+          PYTHONPATH="$RES/site-packages:$RES/app" "$RES/python/bin/python3.12" -c "import backend.main, backend.app, webview; print('ok')"
+          codesign --verify --strict "dist/Agent Office.app"
