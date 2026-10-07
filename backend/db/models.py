@@ -41,6 +41,13 @@ class Agent(SQLModel, table=True):
     vm_daemon_port: int | None = None
     created_at: datetime = Field(default_factory=utcnow)
 
+    @property
+    def permissions(self) -> dict[str, str]:
+        """Every kind of tool with its level, wherever an agent is shown."""
+        from backend.policy.permissions import permissions_of
+
+        return dict(permissions_of(self))
+
 
 class Message(SQLModel, table=True):
     __tablename__ = "messages"

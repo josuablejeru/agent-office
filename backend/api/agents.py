@@ -13,7 +13,7 @@ from backend.agents.models import AgentCreate, AgentRead, AgentUpdate
 from backend.agents.runtime import RunService
 from backend.api.deps import AgentManagerDep, RunServiceDep, SettingsDep, VMManagerDep
 from backend.db.models import Agent
-from backend.policy.permissions import ALWAYS_ASKS, GROUPS, permissions_of
+from backend.policy.permissions import ALWAYS_ASKS, GROUPS
 from backend.vm.errors import VMError
 from backend.vm.lifecycle import VMManager, VMStatus
 
@@ -30,7 +30,6 @@ AVATAR_STEM = "avatar"
 async def to_read(agent: Agent, vms: VMManager, runs: RunService | None = None) -> AgentRead:
     # The live VM state is authoritative; the stored column is only a cache.
     read = AgentRead.model_validate(agent)
-    read.permissions = dict(permissions_of(agent))
     read.vm_status = await vms.status(agent)
     if runs is not None and agent.id is not None:
         read.activity = runs.activity(agent.id)

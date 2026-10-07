@@ -7,10 +7,12 @@ rules still apply on top: "allow" never skips an approval a rule asks for.
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from backend.db.models import Agent
 from backend.policy.actions import PolicyAction
+
+if TYPE_CHECKING:
+    from backend.db.models import Agent
 
 Level = Literal["allow", "ask", "off"]
 UnknownAction = Literal["default", "allow", "ask"]

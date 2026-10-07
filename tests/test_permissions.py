@@ -230,6 +230,16 @@ def test_the_settings_page_can_read_and_change_an_agents_permissions(client: Any
     again = client.patch(f"/api/agents/{created['id']}", json={"system_prompt": "x", "perm_files": False}).json()
     assert again["permissions"]["shell"] == "ask" and again["permissions"]["files"] == "off"
 
+    # Every place that returns an agent shows the same levels (the list, and VM actions too).
+    assert client.get("/api/agents").json()[0]["permissions"] == again["permissions"]
+    from backend.agents.models import AgentRead
+    from backend.db.models import Agent as AgentRow
+
+    row = AgentRow(name="x", provider="p", model="m", vm_disk_path="/d", perm_shell=False)
+    assert AgentRead.model_validate({**row.model_dump(), "id": 1, "permissions": row.permissions,
+                                     "created_at": row.created_at}).permissions["shell"] == "off"
+    assert AgentRead.model_validate(row.model_copy(update={"id": 1})).permissions["shell"] == "off"
+
     for bad in ({"permissions": {"shell": "sometimes"}}, {"permissions": {"root": "allow"}}, {"unknown_action": "off"}):
         assert client.patch(f"/api/agents/{created['id']}", json=bad).status_code == 422
 
