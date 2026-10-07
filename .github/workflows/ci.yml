@@ -58,5 +58,6 @@ jobs:
       - name: The bundled Python starts and finds the backend
         run: |
           RES="dist/Agent Office.app/Contents/Resources"
-          PYTHONPATH="$RES/site-packages:$RES/app" "$RES/python/bin/python3.12" -c "import backend.main, backend.app, webview; print('ok')"
+          # As the launcher runs it: writing compiled files into the bundle would break its signature.
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$RES/site-packages:$RES/app" "$RES/python/bin/python3.12" -c "import backend.main, backend.app, webview; print('ok')"
           codesign --verify --strict "dist/Agent Office.app"
