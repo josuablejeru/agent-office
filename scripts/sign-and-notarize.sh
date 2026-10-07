@@ -28,7 +28,7 @@ echo "==> Signing the code inside the bundle"
 count=0
 while IFS= read -r -d '' file; do
   if file -b "$file" | grep -q "Mach-O"; then
-    sign --entitlements "$ENTITLEMENTS" "$file" 2>/dev/null
+    sign --entitlements "$ENTITLEMENTS" "$file" 2>&1 | grep -v ': replacing existing signature$' || true
     count=$((count + 1))
   fi
 done < <(find "$APP/Contents/Resources" -type f \( -perm -u+x -o -name '*.so' -o -name '*.dylib' \) -print0)

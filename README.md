@@ -36,6 +36,12 @@ Apple Developer ID and notarized is blocked by macOS when downloaded; build it
 yourself instead (`scripts/build-app.sh`), or remove the download mark with
 `xattr -dr com.apple.quarantine "/Applications/Agent Office.app"`.
 
+**Updating:** quit the app, replace it in Applications with the new one and
+open it again. Your agents, their disks and settings live in
+`~/.config/agent-office` and are kept; each agent's computer picks up the new
+tools the next time it is turned on. macOS may ask once more for Local Network
+access after an update.
+
 ## Requirements
 
 - Apple Silicon Mac, macOS 13 or later
