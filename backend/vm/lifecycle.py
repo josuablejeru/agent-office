@@ -43,6 +43,8 @@ SNAPSHOT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 # Asked at every VM start: how the guest reaches the host's DNS forwarder, if it runs.
 DnsSettings = Callable[[], Awaitable[dict[str, Any] | None]]
+# Returns the extra root certificates for agents' computers, as PEM text.
+CertificateBundle = Callable[[], Awaitable[str]]
 CommandLookup = Callable[[int], Awaitable[str | None]]
 Detector = Callable[[], Awaitable[Capabilities]]
 
@@ -123,8 +125,10 @@ class QemuVMManager(VMManager):
         detect: Detector = detect_capabilities,
         shutdown_timeout: float = 60.0,
         dns_settings: DnsSettings | None = None,
+        certificates: CertificateBundle | None = None,
     ) -> None:
         self.dns_settings = dns_settings
+        self.certificates = certificates
         self._settings = settings
         self._command_lookup = command_lookup
         self._detect = detect
@@ -251,7 +255,8 @@ class QemuVMManager(VMManager):
         # Rebuilt on every start so the guest always runs the current daemon code.
         seed = self.seed_iso(agent)
         dns = await self.dns_settings() if self.dns_settings else None
-        await build_seed_iso(seed, agent.name, self.guest_secret(agent), dns=dns)
+        certificates = await self.certificates() if self.certificates else ""
+        await build_seed_iso(seed, agent.name, self.guest_secret(agent), dns=dns, certificates=certificates)
 
         spec = VMSpec(
             name=agent.name,

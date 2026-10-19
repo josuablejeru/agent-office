@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from guest.browser import Browser
+from guest.certificates import configure_certificates
 from guest.database import db_list, db_sql
 from guest.files import file_list, file_read, file_write
 from guest.memory import memory_context, memory_forget, memory_recall, memory_remember
@@ -157,6 +158,8 @@ def main() -> None:
         raise SystemExit(f"{secret_path} is empty; refusing to start without a secret")
     ensure_shared_dir()
     configure_dns()
+    # Before the browser opens: Chrome reads its certificate policy only at start.
+    configure_certificates()
     # Reachable only through QEMU's host-loopback port forward.
     host = os.environ.get("AGENTD_HOST", "0.0.0.0")
     port = int(os.environ.get("AGENTD_PORT", DEFAULT_PORT))

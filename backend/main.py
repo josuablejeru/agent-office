@@ -30,6 +30,7 @@ from backend.db.database import create_db_engine, init_db
 from backend.instance import acquire_instance_lock
 from backend.keystore import KeyStore
 from backend.logging_config import configure_logging, get_logger
+from backend.net.certificates import CertificateSource
 from backend.net.dns import DnsForwarder
 from backend.policy.approvals import ApprovalBroker
 from backend.policy.setup import build_policy_engine
@@ -73,12 +74,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # them off separately when it quits (backend/shutdown.py).
 
 
+def use_system_trust() -> None:
+    """Verify HTTPS against the Mac's own trust settings instead of a bundled list.
+
+    Provider calls (httpx, google-auth) otherwise trust only public roots, and
+    fail on a company network that inspects HTTPS with its own root.
+    """
+    import truststore
+
+    truststore.inject_into_ssl()
+
+
 def create_app(
     settings: Settings | None = None,
     key_store: KeyStore | None = None,
     ui_dir: Path | None = None,
 ) -> FastAPI:
     """Build the API. With `ui_dir`, the built frontend is served from the same origin."""
+    use_system_trust()
     settings = settings or Settings.from_env()
     key_store = key_store or KeyStore()
     configure_logging()
@@ -101,8 +114,15 @@ def create_app(
         if network.get("split_dns", True)
         else None
     )
+    # Root certificates the Mac trusts beyond the public ones, for agents' computers.
+    app.state.certificates = CertificateSource(
+        from_mac=bool(network.get("trust_mac_certificates", True)),
+        extra_files=[str(path) for path in network.get("extra_ca_certificates") or []],
+        added_dir=settings.home / "certificates",
+    )
+    app.state.vm_manager.certificates = app.state.certificates.bundle
     app.state.key_store = key_store
-    app.state.base_image_builder = BaseImageBuilder(settings)
+    app.state.base_image_builder = BaseImageBuilder(settings, certificates=app.state.certificates.bundle)
     app.state.approvals = ApprovalBroker()
     app.state.channels = ChannelService(engine)
 

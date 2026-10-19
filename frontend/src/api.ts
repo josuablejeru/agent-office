@@ -138,6 +138,19 @@ export const api = {
   postToChannel: (id: number, content: string) =>
     request<ChannelMessage>(`/api/channels/${id}/messages`, post({ content })),
   dnsStatus: () => request<DnsStatus>("/api/system/dns"),
+  addCertificate: async (file: File) => {
+    const response = await fetch("/api/system/certificates", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: file,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.detail ?? "The certificate could not be added.");
+    }
+  },
+  removeCertificate: (fingerprint: string) =>
+    request<void>(`/api/system/certificates/${encodeURIComponent(fingerprint)}`, { method: "DELETE" }),
   getSettings: () => request<AppSettings>("/api/settings"),
   setSettings: (settings: AppSettings) =>
     request<AppSettings>("/api/settings", { method: "PUT", body: JSON.stringify(settings) }),
@@ -172,6 +185,8 @@ export const api = {
   setProviderKey: (provider: string, key: string) =>
     request<void>(`/api/providers/${provider}/key`, { method: "PUT", body: JSON.stringify({ key }) }),
   baseImage: () => request<BaseImageStatus>("/api/system/base-image"),
+  importBaseImage: (path: string) =>
+    request<BaseImageStatus>("/api/system/base-image/import", { method: "POST", body: JSON.stringify({ path }) }),
   buildBaseImage: () => request<BaseImageStatus>("/api/system/base-image", post()),
   listModels: (provider: string) => request<string[]>(`/api/providers/${provider}/models`),
   capabilities: () => request<Capabilities>("/api/system/capabilities"),

@@ -64,6 +64,7 @@ export interface DnsStatus {
   default_servers: string[];
   rules: Record<string, string[]>;
   search_domains: string[];
+  certificates: { subject: string; expires: string; source: string; fingerprint: string }[];
 }
 
 export interface AppSettings {

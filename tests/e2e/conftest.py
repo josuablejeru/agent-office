@@ -148,6 +148,40 @@ class FakeInternalDns:
         self._socket.close()
 
 
+class TlsServer:
+    """An HTTPS site on the Mac, reached from agents' computers as 10.0.2.2."""
+
+    def __init__(self, cert: Path, key: Path, text: str) -> None:
+        import ssl
+
+        body = f"<title>{text}</title><p>{text}</p>".encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args: Any) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.port = free_port()
+        self._server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert, key)
+        self._server.socket = context.wrap_socket(self._server.socket, server_side=True)
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+    @property
+    def url(self) -> str:
+        return f"https://10.0.2.2:{self.port}/"
+
+    def close(self) -> None:
+        self._server.shutdown()
+
+
 class Office:
     """A running backend on a throwaway data directory, driven over HTTP like the app does."""
 
@@ -157,6 +191,8 @@ class Office:
         self.port = free_port()
         self._process: subprocess.Popen[bytes] | None = None
         self.http: httpx.Client | None = None
+        self.intranet: TlsServer | None = None
+        self.elsewhere: TlsServer | None = None
 
     def start_backend(self) -> None:
         self.port = free_port()
@@ -250,6 +286,17 @@ def office(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Office]:
     if not BASE_IMAGE.exists():
         pytest.skip(f"base image missing: {BASE_IMAGE} (build it with scripts/create-base-image.sh)")
     home = tmp_path_factory.mktemp("office")
+    # A stand-in for a company's HTTPS inspection root, given to the app as a file
+    # (the Mac's own keychains are left out, so the test is the same on every Mac).
+    from tests.certs import make_ca, make_server, pem
+
+    certs = home / "certs"
+    certs.mkdir()
+    corporate, corporate_key = make_ca("Agent Office E2E Corporate Root")
+    stranger, stranger_key = make_ca("Unrelated Root")
+    (certs / "corporate-root.pem").write_text(pem(corporate))
+    intranet = TlsServer(*make_server(corporate, corporate_key, certs, "intranet"), "intranet-ok")
+    elsewhere = TlsServer(*make_server(stranger, stranger_key, certs, "elsewhere"), "elsewhere")
     (home / "images").mkdir()
     (home / "images" / BASE_IMAGE.name).symlink_to(BASE_IMAGE)
     model, internal_dns = ScriptedModel(), FakeInternalDns()
@@ -258,9 +305,12 @@ def office(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Office]:
             "type": "openai-compatible", "base_url": f"http://127.0.0.1:{model.port}/v1", "api_key": "none"}},
         # Its own DNS port: the installed app may be using the default one.
         "network": {"dns_port": free_port(socket.SOCK_DGRAM),
-                    "dns_rules": {"e2e.internal": [f"127.0.0.1:{internal_dns.port}"]}},
+                    "dns_rules": {"e2e.internal": [f"127.0.0.1:{internal_dns.port}"]},
+                    "trust_mac_certificates": False,
+                    "extra_ca_certificates": [str(certs / "corporate-root.pem")]},
     }))
     running = Office(home, model)
+    running.intranet, running.elsewhere = intranet, elsewhere
     running.start_backend()
     try:
         yield running
@@ -277,6 +327,8 @@ def office(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Office]:
             os.kill(pid, signal.SIGKILL)
         model.close()
         internal_dns.close()
+        intranet.close()
+        elsewhere.close()
         if os.environ.get("AGENT_OFFICE_E2E_KEEP") == "1":
             print(f"\ntest data kept for inspection: {home}")
         else:

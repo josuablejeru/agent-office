@@ -31,6 +31,7 @@ def render_meta_data(agent_name: str) -> str:
 
 
 HOST_DNS_FILENAME = "host_dns.json"
+HOST_CA_FILENAME = "host_ca.pem"
 
 
 def stage_seed(
@@ -39,6 +40,7 @@ def stage_seed(
     secret: str,
     guest_source: Path,
     dns: dict[str, Any] | None = None,
+    certificates: str = "",
 ) -> None:
     """Lay out the seed disk contents in `staging`.
 
@@ -55,6 +57,10 @@ def stage_seed(
         shutil.copyfile(source, guest_dir / source.name)
     if dns is not None:
         (guest_dir / HOST_DNS_FILENAME).write_text(json.dumps(dns))
+    if certificates:
+        # Root certificates the Mac trusts beyond the public ones (a company's
+        # HTTPS inspection, for example); the guest installs them at start.
+        (guest_dir / HOST_CA_FILENAME).write_text(certificates)
 
 
 async def build_seed_iso(
@@ -63,12 +69,13 @@ async def build_seed_iso(
     secret: str,
     guest_source: Path = GUEST_SOURCE_DIR,
     dns: dict[str, Any] | None = None,
+    certificates: str = "",
 ) -> None:
     """Write the seed ISO. macOS ships hdiutil, so no extra tooling is required."""
     staging = iso_path.parent / "seed"
     shutil.rmtree(staging, ignore_errors=True)
     try:
-        stage_seed(staging, agent_name, secret, guest_source, dns)
+        stage_seed(staging, agent_name, secret, guest_source, dns, certificates)
         iso_path.unlink(missing_ok=True)
         await run_checked(
             "hdiutil", "makehybrid", "-iso", "-joliet",

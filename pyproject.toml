@@ -12,6 +12,8 @@ dependencies = [
     "httpx>=0.27",
     "websockets>=17,<18",
     "anthropic[vertex]>=1.11.0",
+    "truststore>=0.10",
+    "cryptography>=43",
 ]
 
 [dependency-groups]

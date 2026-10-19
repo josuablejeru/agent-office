@@ -284,6 +284,34 @@ def test_memory_and_channels_settings_cover_what_happens_without_a_tool_call(
     assert "Dana Meier: Our accountant" in office.model.last_system_prompt("alice")
 
 
+def test_a_company_root_certificate_is_trusted_everywhere_on_the_agents_computer(
+    office: Office, team: dict[str, int]
+) -> None:
+    alice = team["alice"]
+    assert office.intranet and office.elsewhere
+    listed = office.api("GET", "/api/system/dns").json()["certificates"]
+    assert [(c["subject"], c["source"]) for c in listed] == [("Agent Office E2E Corporate Root", "corporate-root.pem")]
+
+    command = (
+        f"curl -sS {office.intranet.url}; echo; "
+        f"python3 -c \"import urllib.request; print(urllib.request.urlopen('{office.intranet.url}').status)\"; "
+        "/opt/agent-office/venv/bin/pip config list; "
+        f"curl -sS {office.elsewhere.url} 2>&1 | head -1"
+    )
+    done = shell(office, "alice", alice, command)
+    out = done["stdout"]
+    assert "intranet-ok" in out and "\n200\n" in out, done["stderr"]  # curl and Python
+    assert "global.cert='/etc/ssl/certs/ca-certificates.crt'" in out  # pip
+    assert "SSL certificate problem" in out  # a root nobody trusted is still refused
+
+    office.model.script("alice", [tool("browser_goto", url=office.intranet.url),
+                                  tool("browser_goto", url=office.elsewhere.url), "done"])
+    run = office.ask(alice)
+    trusted, untrusted = result(run, 0), result(run, 1)
+    assert trusted.get("title") == "intranet-ok", trusted  # Chrome
+    assert "ERR_CERT_AUTHORITY_INVALID" in untrusted.get("error", ""), untrusted
+
+
 def test_turning_a_computer_off_stops_the_agents_task(office: Office, team: dict[str, int]) -> None:
     bob = team["bob"]
     office.model.script("bob", [tool("shell_exec", command="sleep 120"), "never reached"])

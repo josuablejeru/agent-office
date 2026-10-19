@@ -175,21 +175,52 @@ class DnsStatus(BaseModel):
     default_servers: list[str]
     rules: dict[str, list[str]]
     search_domains: list[str]
+    # Root certificates passed on to agents' computers (subject, expiry, where from).
+    certificates: list[dict[str, str]] = []
 
 
 @router.get("/system/dns")
 async def dns_status(request: Request) -> DnsStatus:
     """How agents' computers resolve names, for the Settings dialog."""
+    certificates = [
+        {"subject": root.subject, "expires": root.expires, "source": root.source, "fingerprint": root.fingerprint}
+        for root in await request.app.state.certificates.roots()
+    ]
     forwarder = request.app.state.dns
     if forwarder is None or not forwarder.running:
-        return DnsStatus(active=False, default_servers=[], rules={}, search_domains=[])
+        return DnsStatus(active=False, default_servers=[], rules={}, search_domains=[], certificates=certificates)
     view = await forwarder.view()
     return DnsStatus(
         active=True,
         default_servers=[address for address, _ in view.default_servers],
         rules={rule.domain: [address for address, _ in rule.servers] for rule in view.rules},
         search_domains=view.search_domains,
+        certificates=certificates,
     )
+
+
+MAX_CERTIFICATE_BYTES = 256 * 1024
+
+
+@router.post("/system/certificates")
+async def add_certificate(request: Request) -> list[dict[str, str]]:
+    """Trust a root certificate on agents' computers (from their next start). The body is the file."""
+    data = await request.body()
+    if len(data) > MAX_CERTIFICATE_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "That file is too large for a certificate.")
+    try:
+        added = request.app.state.certificates.add(data)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    log.info("root certificate added", extra={"subjects": [root.subject for root in added]})
+    return [{"subject": root.subject, "fingerprint": root.fingerprint} for root in added]
+
+
+@router.delete("/system/certificates/{fingerprint}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_certificate(fingerprint: str, request: Request) -> None:
+    if not request.app.state.certificates.remove(fingerprint):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such certificate was added in the app.")
+    log.info("root certificate removed")
 
 
 @router.get("/settings")
@@ -236,6 +267,16 @@ async def model_status(
 @router.get("/system/base-image")
 async def base_image_status(builder: BaseImageBuilderDep) -> BaseImageStatus:
     return builder.status()
+
+
+class ImageImport(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+@router.post("/system/base-image/import")
+async def import_base_image(payload: ImageImport, builder: BaseImageBuilderDep) -> BaseImageStatus:
+    """Use a system image built on another Mac, for when building here is not possible."""
+    return builder.start_import(payload.path)
 
 
 @router.post("/system/base-image")

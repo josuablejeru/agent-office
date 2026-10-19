@@ -110,6 +110,22 @@ class DockNotifier(Notifier):
         self._on_main_thread(update)
 
 
+class WindowApi:
+    """What the page in the app window may ask of the app itself (window.pywebview.api)."""
+
+    # Underscored: pywebview hands public attributes to the page, and the window must not be one.
+    _window: Any = None
+
+    def choose_image(self) -> str | None:
+        """Let the user pick a system image file; returns its path, or None if cancelled."""
+        import webview
+
+        chosen = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, file_types=("Disk images (*.qcow2)", "All files (*.*)")
+        )
+        return str(chosen[0]) if chosen else None
+
+
 def on_window_ready(window: Any) -> None:
     """Runs once the window exists: brand the process and record whether the UI came up."""
     brand_process()
@@ -152,7 +168,10 @@ def main() -> int:
 
     # The token rides in the URL fragment, which is never sent to the server or logged.
     url = f"http://{LOOPBACK}:{port}/#token={app.state.api_token}"
-    window = webview.create_window(APP_NAME, url, width=1440, height=900, min_size=(900, 600))
+    window = webview.create_window(
+        APP_NAME, url, width=1440, height=900, min_size=(900, 600), js_api=WindowApi()
+    )
+    WindowApi._window = window
     webview.start(on_window_ready, window)
 
     # Not reached when the app is quit with Cmd-Q, which ends the process inside

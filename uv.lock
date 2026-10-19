@@ -12,11 +12,13 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "anthropic", extra = ["vertex"] },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlmodel" },
+    { name = "truststore" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
 ]
@@ -33,11 +35,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", extras = ["vertex"], specifier = ">=1.11.0" },
+    { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlmodel", specifier = ">=0.0.22" },
+    { name = "truststore", specifier = ">=0.10" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "websockets", specifier = ">=17,<18" },
 ]

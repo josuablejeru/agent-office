@@ -172,6 +172,27 @@ function AddProvider({ onChanged }: { onChanged: () => Promise<void> }) {
 export function SettingsModal({ providers, onClose, onChanged }: Props) {
   const [keepRunning, setKeepRunning] = useState<boolean | null>(null);
   const [dns, setDns] = useState<DnsStatus | null>(null);
+  const [certificateError, setCertificateError] = useState<string | null>(null);
+
+  async function addCertificate(file: File) {
+    setCertificateError(null);
+    try {
+      await api.addCertificate(file);
+      setDns(await api.dnsStatus());
+    } catch (err) {
+      setCertificateError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function removeCertificate(fingerprint: string) {
+    setCertificateError(null);
+    try {
+      await api.removeCertificate(fingerprint);
+      setDns(await api.dnsStatus());
+    } catch (err) {
+      setCertificateError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   useEffect(() => {
     void api
@@ -228,6 +249,41 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
             work on their computers.
           </p>
         )}
+
+        <h4>Trusted certificates</h4>
+        <p className="hint">
+          For networks that inspect secure connections with their own root certificate. Agents&apos; computers
+          trust the roots this Mac trusts beyond the public ones, and any you add here. Changes reach a
+          computer the next time it is turned on.
+        </p>
+        {dns?.certificates.map((certificate) => (
+          <div key={certificate.fingerprint} className="dns-rule">
+            <code>{certificate.subject}</code>
+            <span className="muted">
+              {certificate.source}, valid until {certificate.expires}
+            </span>
+            {certificate.source === "added in the app" && (
+              <button className="link-button" onClick={() => void removeCertificate(certificate.fingerprint)}>
+                Remove
+              </button>
+            )}
+          </div>
+        ))}
+        {dns && dns.certificates.length === 0 && <p className="hint">None at the moment.</p>}
+        <label className="file-button">
+          Add certificate…
+          <input
+            type="file"
+            accept=".pem,.crt,.cer,.der"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void addCertificate(file);
+            }}
+          />
+        </label>
+        {certificateError && <p className="form-error">{certificateError}</p>}
 
         <h3>Model providers</h3>
         <p className="hint">

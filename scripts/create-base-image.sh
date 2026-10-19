@@ -10,6 +10,9 @@
 #
 # Usage: scripts/create-base-image.sh [--force]
 #   --force   rebuild an existing base image (refused while agent disks use it)
+#   EXTRA_CA_FILE=roots.pem   also trust these root certificates while
+#             downloading (a company network that inspects HTTPS); the app
+#             passes the roots this Mac trusts beyond the public ones
 set -euo pipefail
 
 HOME_DIR="${AGENT_OFFICE_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-office}"
@@ -85,6 +88,15 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM INT
 
+EXTRA_CA_B64=""
+if [ -n "${EXTRA_CA_FILE:-}" ] && [ -s "$EXTRA_CA_FILE" ]; then
+  echo "==> Also trusting the root certificates in $EXTRA_CA_FILE"
+  # Downloads on the Mac: the public roots plus the extra ones.
+  cat /etc/ssl/cert.pem "$EXTRA_CA_FILE" >"$WORK_DIR/ca-bundle.pem"
+  export CURL_CA_BUNDLE="$WORK_DIR/ca-bundle.pem"
+  EXTRA_CA_B64="$(base64 <"$EXTRA_CA_FILE" | tr -d '\n')"
+fi
+
 echo "==> Downloading $CLOUD_IMAGE"
 curl -fL --retry 3 -C - -o "$CACHE_DIR/$CLOUD_IMAGE" "$MIRROR/$CLOUD_IMAGE"
 expected="$(curl -fsSL "$MIRROR/SHA512SUMS" | awk -v f="$CLOUD_IMAGE" '$2 == f {print $1}')"
@@ -120,6 +132,12 @@ chpasswd:
     - name: $GUEST_USER
       password: $password
       type: text
+$(if [ -n "$EXTRA_CA_B64" ]; then cat <<CA
+# Trusted before anything is downloaded inside the VM (bootcmd runs first).
+bootcmd:
+  - [sh, -c, "mkdir -p /usr/local/share/ca-certificates/agent-office && echo $EXTRA_CA_B64 | base64 -d > /usr/local/share/ca-certificates/agent-office/build.crt && update-ca-certificates"]
+CA
+fi)
 package_update: true
 packages:
 $(printf '  - %s\n' "${PACKAGES[@]}")
@@ -208,7 +226,8 @@ write_files:
 runcmd:
   - mkdir -p /etc/agent-office /opt/agent-office
   - python3 -m venv $GUEST_VENV
-  - $GUEST_VENV/bin/pip install --no-cache-dir ${GUEST_PIP_PACKAGES[*]}
+  # pip brings its own list of roots; point it at the system's, which has any extra ones.
+  - PIP_CERT=/etc/ssl/certs/ca-certificates.crt $GUEST_VENV/bin/pip install --no-cache-dir ${GUEST_PIP_PACKAGES[*]}
   - curl -fsSL -o /tmp/chrome.deb $CHROME_DEB_URL
   - DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/chrome.deb
   - rm -f /tmp/chrome.deb
@@ -219,6 +238,8 @@ runcmd:
   - systemctl enable qemu-guest-agent agent-office-seed.service agent-office-agentd.service lightdm.service
   - apt-get clean
   - dpkg -s ${PACKAGES[*]} >/dev/null && $GUEST_VENV/bin/python -c "import websockets, playwright" && test -x /usr/bin/google-chrome && echo $OK_MARKER >/dev/ttyAMA0
+  # Each agent computer receives the current roots from the app at every start.
+  - rm -rf /usr/local/share/ca-certificates/agent-office && update-ca-certificates --fresh >/dev/null
   # Each agent overlay must generate its own machine-id on first boot.
   - truncate -s 0 /etc/machine-id
   - rm -f /var/lib/dbus/machine-id
