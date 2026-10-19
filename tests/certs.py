@@ -61,3 +61,15 @@ def make_server(ca: x509.Certificate, ca_key: ec.EllipticCurvePrivateKey, direct
 
 def pem(certificate: x509.Certificate) -> str:
     return certificate.public_bytes(serialization.Encoding.PEM).decode()
+
+
+def make_v1_root(common_name: str) -> x509.Certificate:
+    """A root without any extensions, as old company CAs sometimes are."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    return (
+        x509.CertificateBuilder()
+        .subject_name(_name(common_name)).issuer_name(_name(common_name))
+        .public_key(key.public_key()).serial_number(x509.random_serial_number())
+        .not_valid_before(NOW - datetime.timedelta(days=1)).not_valid_after(NOW + datetime.timedelta(days=30))
+        .sign(key, hashes.SHA256())
+    )

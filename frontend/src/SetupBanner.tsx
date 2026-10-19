@@ -7,6 +7,7 @@ const POLL_MS = 3000;
 /** First-run setup: offers to build the system image agent computers start from. */
 export function SetupBanner() {
   const [status, setStatus] = useState<BaseImageStatus | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +36,11 @@ export function SetupBanner() {
     if (path) setStatus(await api.importBaseImage(path));
   }
 
+  function chooseImage() {
+    setProblem(null);
+    useImageFile().catch((err) => setProblem(err instanceof Error ? err.message : String(err)));
+  }
+
   const failed = status.detail.startsWith("Build failed") || status.detail.startsWith("Import failed");
   return (
     <div className="notice setup">
@@ -42,6 +48,7 @@ export function SetupBanner() {
         <strong>One-time setup.</strong> Agents need a system image for their computers (Debian with
         a desktop and Chrome). Building it downloads about 1 GB and takes several minutes.
         {status.detail && <div className="setup-detail">{status.detail}</div>}
+        {problem && <div className="setup-detail">The image could not be used: {problem}</div>}
         {failed && (
           <div className="setup-detail">
             If building does not work on this network, build the image on another Mac and use that file
@@ -50,7 +57,7 @@ export function SetupBanner() {
         )}
       </div>
       <div className="setup-actions">
-        <button disabled={status.building} onClick={() => void useImageFile()}>
+        <button disabled={status.building} onClick={chooseImage}>
           Use an image file…
         </button>
         <button

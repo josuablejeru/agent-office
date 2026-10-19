@@ -14,7 +14,9 @@ client certificates, and anything the user never trusted, stay on the Mac.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import tempfile
 import time
 import warnings
 from datetime import UTC, datetime
@@ -60,10 +62,15 @@ def certificate_authorities(pem_bytes: bytes) -> list[x509.Certificate]:
                 # Some old public roots have non-standard serial numbers; they are still readable.
                 warnings.simplefilter("ignore")
                 certificate = x509.load_pem_x509_certificate(block)
-                constraints = certificate.extensions.get_extension_for_class(x509.BasicConstraints).value
-        except (ValueError, x509.ExtensionNotFound):
+                try:
+                    is_ca = certificate.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
+                except x509.ExtensionNotFound:
+                    # Old (version 1) roots, as some company CAs still use, have no
+                    # extensions at all: a self-signed one is a root.
+                    is_ca = certificate.subject == certificate.issuer
+        except ValueError:
             continue
-        if constraints.ca and certificate.not_valid_after_utc > now:
+        if is_ca and certificate.not_valid_after_utc > now:
             found.append(certificate)
     return found
 
@@ -93,8 +100,10 @@ def read_any(data: bytes) -> list[x509.Certificate]:
 
 async def trusted_by_macos(pem: str) -> bool:
     """Whether macOS accepts this certificate, without going to the network."""
-    path = Path(f"/tmp/agent-office-cert-{abs(hash(pem))}.pem")
-    path.write_text(pem)
+    handle, name = tempfile.mkstemp(suffix=".pem")
+    path = Path(name)
+    with os.fdopen(handle, "w") as file:
+        file.write(pem)
     try:
         output = await run_command("security", "verify-cert", "-c", str(path), "-p", "basic", "-L", "-q")
     finally:

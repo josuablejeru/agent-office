@@ -18,7 +18,7 @@ from backend.net.certificates import CertificateSource, beyond_public, certifica
 from backend.vm.base_image import BaseImageBuilder
 from backend.vm.seed import HOST_CA_FILENAME, stage_seed
 from guest import certificates as guest_certificates
-from tests.certs import make_ca, pem
+from tests.certs import make_ca, make_v1_root, pem
 
 
 def test_only_unexpired_certificate_authorities_are_taken() -> None:
@@ -235,3 +235,9 @@ def test_a_certificate_can_be_added_and_removed_in_settings(tmp_path: Path) -> N
         assert client.get("/api/system/dns").json()["certificates"] == []
         assert client.delete(f"/api/system/certificates/{added['fingerprint']}").status_code == 404
         assert client.delete("/api/system/certificates/..%2Fsecrets").status_code == 404
+
+
+def test_an_old_root_without_extensions_is_still_a_root() -> None:
+    old_root = make_v1_root("Example Corp Legacy Root")
+    found = certificate_authorities(pem(old_root).encode())
+    assert [c.subject.rfc4514_string() for c in found] == ["CN=Example Corp Legacy Root"]
