@@ -58,7 +58,9 @@ builds `Agent Office.app` and installs it into `/Applications`. Open it like
 any other app. It starts the backend itself and shows the UI in its own window.
 
 - **First start on a new Mac:** the window offers to build the system image
-  agents boot from (about 1 GB of downloads, several minutes).
+  agents boot from (about 1 GB of downloads, several minutes). Where that is
+  not possible, "Use an image file…" takes an image built on another Mac: copy
+  `~/.config/agent-office/images/debian-desktop.qcow2` from there.
 - **Quitting** shuts every agent's computer down cleanly; disks are kept, so
   each agent continues where it left off. Settings has a switch to keep them
   running in the background instead.
@@ -216,6 +218,17 @@ Settings shows the internal domains currently in effect.
 - An agent's computer picks the forwarder up when it is turned on. Its name
   lookups then depend on the app: while the app is closed, a computer that was
   left running ("keep running after I quit") cannot resolve names.
+- **Company certificates.** Networks that inspect secure connections use
+  their own root certificate, which IT installs on the Mac. Agents' computers
+  trust the roots this Mac trusts beyond the public ones, plus any you add
+  under Settings › Network › Trusted certificates (or list in
+  `network.extra_ca_certificates`). They are installed for Chrome and for the
+  command line (`curl`, `apt`, `pip`, Python, Node) each time a computer
+  starts, and building the system image uses them too.
+  `network.trust_mac_certificates: false` stops taking them from the Mac. The
+  app's own connections to model providers use the Mac's trust settings.
+  If your network also needs a proxy server configured, that is not
+  supported yet.
 - **Signing in is separate.** The agent's Chrome has none of your sessions or
   certificates. Use Take control to log in once; tools that require a
   company-managed device or a client certificate will refuse it.
@@ -324,6 +337,8 @@ To uninstall: delete `/Applications/Agent Office.app`,
 | A task stalls for a long time and then fails | The Mac went to sleep: agents and their computers pause with it. Keep the Mac awake (plugged in, lid open) for long tasks. |
 | A model server on your network works from Terminal but not from the app | System Settings › Privacy & Security › Local Network: allow Agent Office. macOS may ask again after the app is rebuilt. |
 | An internal hostname does not resolve on an agent's computer | Settings › Network should list the domain while the VPN is connected. If not, add it under `network.dns_rules`. Turn the agent's computer off and on once after updating the app. |
+| Building the system image fails with certificate errors | The network inspects secure connections. Add the company's root certificate under Settings › Network › Trusted certificates (IT can provide it, or export it from Keychain Access) and build again, or use "Use an image file…" with an image built on another Mac. |
+| Websites show certificate errors on an agent's computer | As above; then turn the agent's computer off and on so it picks the certificate up. |
 | The app says it is already running | Quit the other copy, or a `start-dev.sh` session |
 
 API reference: run from source and open http://127.0.0.1:8000/docs.

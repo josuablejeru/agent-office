@@ -98,14 +98,17 @@ if [ -n "${EXTRA_CA_FILE:-}" ] && [ -s "$EXTRA_CA_FILE" ]; then
 fi
 
 echo "==> Downloading $CLOUD_IMAGE"
-curl -fL --retry 3 -C - -o "$CACHE_DIR/$CLOUD_IMAGE" "$MIRROR/$CLOUD_IMAGE"
 expected="$(curl -fsSL "$MIRROR/SHA512SUMS" | awk -v f="$CLOUD_IMAGE" '$2 == f {print $1}')"
 [ -n "$expected" ] || die "no checksum published for $CLOUD_IMAGE"
-actual="$(shasum -a 512 "$CACHE_DIR/$CLOUD_IMAGE" | awk '{print $1}')"
-if [ "$expected" != "$actual" ]; then
+# A cached download from an earlier "latest" no longer matches: fetch it afresh once.
+for attempt in 1 2; do
+  curl -fL --retry 3 -C - -o "$CACHE_DIR/$CLOUD_IMAGE" "$MIRROR/$CLOUD_IMAGE"
+  actual="$(shasum -a 512 "$CACHE_DIR/$CLOUD_IMAGE" | awk '{print $1}')"
+  [ "$expected" = "$actual" ] && break
   rm -f "$CACHE_DIR/$CLOUD_IMAGE"
-  die "checksum mismatch for $CLOUD_IMAGE; the cached download was removed, run again"
-fi
+  [ "$attempt" = 2 ] && die "checksum mismatch for $CLOUD_IMAGE; the download was removed, run again"
+  echo "    the cached copy is out of date; downloading it again"
+done
 
 echo "==> Preparing ${DISK_SIZE} disk"
 qemu-img convert -O qcow2 "$CACHE_DIR/$CLOUD_IMAGE" "$WORK_DIR/disk.qcow2"
