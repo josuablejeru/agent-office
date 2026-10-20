@@ -271,3 +271,13 @@ def test_the_root_side_script_writes_one_file_per_certificate(tmp_path: Path) ->
     files = sorted((tmp_path / "store").iterdir())
     assert [f.name for f in files] == ["host-0001.crt", "host-0002.crt", "host-0003.crt"]
     assert [f.read_text() for f in files] == roots
+
+
+def test_the_build_log_is_shown_without_progress_redraws(tmp_path: Path) -> None:
+    settings = Settings(home=tmp_path / "home")
+    settings.ensure_layout()
+    builder = BaseImageBuilder(settings)
+    assert builder.log_tail() == []
+    builder.log_path.write_text("==> Downloading\n 10%\r 50%\r100% done\n\n    vm: Setting up xfce4\n")
+    assert builder.log_tail() == ["==> Downloading", "100% done", "    vm: Setting up xfce4"]
+    assert builder.log_tail(lines=1) == ["    vm: Setting up xfce4"]

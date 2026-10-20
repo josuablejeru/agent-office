@@ -97,6 +97,10 @@ if [ -n "${EXTRA_CA_FILE:-}" ] && [ -s "$EXTRA_CA_FILE" ]; then
   export CURL_CA_BUNDLE="$WORK_DIR/ca-bundle.pem"
 fi
 
+BUILD_STARTED=$SECONDS
+phase_started=$SECONDS
+took() { echo "    took $((SECONDS - phase_started))s"; phase_started=$SECONDS; }
+
 echo "==> Downloading $CLOUD_IMAGE"
 expected="$(curl -fsSL "$MIRROR/SHA512SUMS" | awk -v f="$CLOUD_IMAGE" '$2 == f {print $1}')"
 [ -n "$expected" ] || die "no checksum published for $CLOUD_IMAGE"
@@ -110,6 +114,7 @@ for attempt in 1 2; do
   echo "    the cached copy is out of date; downloading it again"
 done
 
+took
 echo "==> Preparing ${DISK_SIZE} disk"
 qemu-img convert -O qcow2 "$CACHE_DIR/$CLOUD_IMAGE" "$WORK_DIR/disk.qcow2"
 qemu-img resize "$WORK_DIR/disk.qcow2" "$DISK_SIZE" >/dev/null
@@ -265,7 +270,8 @@ EOF
 hdiutil makehybrid -quiet -iso -joliet -default-volume-name cidata \
   -o "$WORK_DIR/seed.iso" "$WORK_DIR/seed"
 
-echo "==> Provisioning (console log: $WORK_DIR/console.log)"
+took
+echo "==> Installing the desktop, Chrome and the agent software inside the VM"
 qemu-system-aarch64 \
   -machine virt -accel hvf -cpu host -smp "$BUILD_CPUS" -m "$BUILD_MEMORY_MB" \
   -bios "$FIRMWARE" \
@@ -277,6 +283,19 @@ qemu-system-aarch64 \
   -display none -serial "file:$WORK_DIR/console.log" &
 qemu_pid=$!
 
+# Pass on what the VM is doing, so the app (and the terminal) can show progress.
+shown=0
+show_progress() {
+  local size
+  size=$(wc -c <"$WORK_DIR/console.log" 2>/dev/null || echo 0)
+  [ "$size" -gt "$shown" ] || return 0
+  tail -c +"$((shown + 1))" "$WORK_DIR/console.log" | head -c "$((size - shown))" \
+    | LC_ALL=C tr -d '\r' | LC_ALL=C sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+    | LC_ALL=C grep -a -E 'Get:[0-9]+ |Setting up |Successfully installed|Collecting |Err:|^E: |error|Cloud-init v\.|Reached target Graphical|Power-Off' \
+    | LC_ALL=C sed -e 's/^\[ *[0-9.]*\] //' -e 's/^/    vm: /' | cut -c1-160 || true
+  shown=$size
+}
+
 waited=0
 while kill -0 "$qemu_pid" 2>/dev/null; do
   if [ "$waited" -ge "$BUILD_TIMEOUT_SECONDS" ]; then
@@ -285,7 +304,9 @@ while kill -0 "$qemu_pid" 2>/dev/null; do
   fi
   sleep 5
   waited=$((waited + 5))
+  show_progress
 done
+show_progress
 wait "$qemu_pid" || true
 qemu_pid=""
 
@@ -294,11 +315,12 @@ if ! grep -q "$OK_MARKER" "$WORK_DIR/console.log"; then
   die "provisioning did not complete; see $IMAGES_DIR/$IMAGE_NAME.build-failed.log"
 fi
 
+took
 rm -f "$BASE_IMAGE"
 mv "$WORK_DIR/disk.qcow2" "$BASE_IMAGE"
 chmod 444 "$BASE_IMAGE"
 rm -f "$PASSWORD_FILE"
 (umask 077 && printf '%s\n' "$password" >"$PASSWORD_FILE")
 
-echo "==> Built $BASE_IMAGE"
+echo "==> Built $BASE_IMAGE ($(du -h "$BASE_IMAGE" | cut -f1), $(( (SECONDS - BUILD_STARTED) / 60 ))m$(( (SECONDS - BUILD_STARTED) % 60 ))s)"
 echo "    Guest login: user '$GUEST_USER', password stored in $PASSWORD_FILE"

@@ -274,6 +274,12 @@ class ImageImport(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
 
 
+@router.get("/system/base-image/log")
+async def base_image_log(builder: BaseImageBuilderDep) -> dict[str, list[str]]:
+    """The end of the image build's output."""
+    return {"lines": builder.log_tail()}
+
+
 @router.post("/system/base-image/import")
 async def import_base_image(payload: ImageImport, builder: BaseImageBuilderDep) -> BaseImageStatus:
     """Use a system image built on another Mac, for when building here is not possible."""

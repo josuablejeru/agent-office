@@ -1366,3 +1366,18 @@ textarea:focus {
   padding: 0 4px;
   font-size: 0.82rem;
 }
+
+.setup-log {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

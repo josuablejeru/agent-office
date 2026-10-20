@@ -54,6 +54,17 @@ class BaseImageBuilder:
             detail=self._detail,
         )
 
+    def log_tail(self, lines: int = 80) -> list[str]:
+        """The end of the last build's output, for the setup banner."""
+        try:
+            # Bytes, not read_text(): that would turn each carriage return into a line.
+            text = self.log_path.read_bytes().decode(errors="replace")
+        except OSError:
+            return []
+        # curl redraws its progress line with carriage returns: keep only the final state.
+        cleaned = [line.rsplit("\r", 1)[-1].rstrip() for line in text.split("\n")]
+        return [line for line in cleaned if line.strip()][-lines:]
+
     def start(self) -> BaseImageStatus:
         current = self.status()
         if not current.ready and not current.building:

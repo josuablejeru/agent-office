@@ -185,6 +185,7 @@ export const api = {
   setProviderKey: (provider: string, key: string) =>
     request<void>(`/api/providers/${provider}/key`, { method: "PUT", body: JSON.stringify({ key }) }),
   baseImage: () => request<BaseImageStatus>("/api/system/base-image"),
+  baseImageLog: () => request<{ lines: string[] }>("/api/system/base-image/log"),
   importBaseImage: (path: string) =>
     request<BaseImageStatus>("/api/system/base-image/import", { method: "POST", body: JSON.stringify({ path }) }),
   buildBaseImage: () => request<BaseImageStatus>("/api/system/base-image", post()),

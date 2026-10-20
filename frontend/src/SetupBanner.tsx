@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { BaseImageStatus } from "./types";
 
@@ -8,6 +8,30 @@ const POLL_MS = 3000;
 export function SetupBanner() {
   const [status, setStatus] = useState<BaseImageStatus | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const [log, setLog] = useState<string[]>([]);
+  const logEnd = useRef<HTMLDivElement>(null);
+
+  // While the details are open, follow the build's output.
+  useEffect(() => {
+    if (!showLog) return;
+    let cancelled = false;
+    const load = () =>
+      api
+        .baseImageLog()
+        .then((next) => !cancelled && setLog(next.lines))
+        .catch(() => undefined);
+    void load();
+    const timer = window.setInterval(load, POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [showLog]);
+
+  useEffect(() => {
+    logEnd.current?.scrollIntoView({ block: "nearest" });
+  }, [log]);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +73,21 @@ export function SetupBanner() {
         a desktop and Chrome). Building it downloads about 1 GB and takes several minutes.
         {status.detail && <div className="setup-detail">{status.detail}</div>}
         {problem && <div className="setup-detail">The image could not be used: {problem}</div>}
+        {(status.building || status.detail) && (
+          <button type="button" className="disclosure" onClick={() => setShowLog((open) => !open)}>
+            {showLog ? "▾ Hide details" : "▸ Show details"}
+          </button>
+        )}
+        {showLog && (
+          <div className="setup-log">
+            {log.length === 0 ? (
+              <span className="muted">No output yet.</span>
+            ) : (
+              log.map((line, index) => <div key={index}>{line}</div>)
+            )}
+            <div ref={logEnd} />
+          </div>
+        )}
         {failed && (
           <div className="setup-detail">
             If building does not work on this network, build the image on another Mac and use that file
