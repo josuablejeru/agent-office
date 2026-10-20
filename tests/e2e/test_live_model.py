@@ -140,6 +140,7 @@ def test_finds_and_clicks_something_only_visible_on_screen(office: Office) -> No
         run = ask(office, looker, f"Open http://10.0.2.2:{port}/ and click the red square on the page. "
                                   "Then tell me where it was.")
         assert run["status"] == "completed", run["error"]
+        assert "browser.screenshot" in tools_used(run)  # it decided to look
         assert "browser.click_at" in tools_used(run)
         assert any(left <= x <= left + 60 and top <= y <= top + 60 for x, y in hits), (hits, (left, top))
     finally:

@@ -56,13 +56,14 @@ def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
 
 # Provider APIs restrict tool names to [A-Za-z0-9_-], hence shell_exec for shell.exec.
 VISION_NOTE = (
-    "You can see the screen: after each browser action you receive a screenshot of the visible "
-    "page. Clickable elements carry their number from the element list in a small red badge; "
-    "prefer acting by that number (browser_click, browser_type). For things without a number "
-    "(drawings, maps, charts, icons, embedded frames) use browser_click_at with a position read "
-    "off the latest screenshot, in its pixels from the top-left corner, then browser_type_text "
-    "to type into what has focus. Look at the screenshot to check that an action did what you "
-    "intended before going on."
+    "You can see the screen when you choose to. Every browser action gives you the page's text "
+    "and its numbered elements; when that is not enough (charts, maps, drawings, layout, icons "
+    "without a label, embedded frames) or you want to check what an action did, call "
+    "browser_screenshot and you receive an image of the visible page. Clickable elements carry "
+    "their number in a small red badge: prefer acting by that number (browser_click, "
+    "browser_type). For things without a number use browser_click_at with a position read off "
+    "your latest screenshot (pixels from its top-left corner), then browser_type_text to type "
+    "into what has focus. Positions change when the page scrolls or changes: look again first."
 )
 
 ALL_TOOLS: list[AgentTool] = [
@@ -396,14 +397,15 @@ VISION_TOOLS: list[AgentTool] = [
 ]
 VISION_SCREENSHOT = ToolSpec(
     name="browser_screenshot",
-    description="Look at the page again: a fresh screenshot, with element numbers drawn on it.",
+    description=(
+        "Look at the page: you receive an image of what is visible, with element numbers drawn "
+        "on it. Use it when the text is not enough, before clicking by position, or to check "
+        "what an action did."
+    ),
     parameters=_schema({}, []),
 )
-# Browser actions after which a model that can see gets a screenshot.
-LOOKS_AFTER = {
-    "browser.goto", "browser.click", "browser.type", "browser.press", "browser.scroll",
-    "browser.extract_text", "browser.click_at", "browser.type_text", "browser.screenshot",
-}
+# The model decides when it looks: only its own screenshot calls bring an image.
+LOOKS_AFTER = {"browser.screenshot"}
 
 
 def tools_for(agent: Agent) -> list[AgentTool]:

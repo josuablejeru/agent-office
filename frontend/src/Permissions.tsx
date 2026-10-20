@@ -107,10 +107,10 @@ export function Permissions({
           Let the model see the screen
         </label>
         <p className="hint">
-          After each browser action the model also gets a screenshot, with element numbers drawn on it, and can
-          click by position: for charts, maps, drawings, icon buttons and embedded pages. Everything visible on
-          those screenshots goes to the model provider, and each step takes longer and costs more. Needs a model
-          that reads images (Claude, Gemini, GPT-4o and similar).
+          The agent can look at the browser when it decides it needs to: it then gets a screenshot with the
+          element numbers drawn on it, and can click and type by position, for charts, maps, drawings, icon
+          buttons and embedded pages. Everything visible on a screenshot it takes goes to the model provider.
+          Needs a model that reads images (Claude, Gemini, GPT-4o and similar).
         </p>
       </div>
 

@@ -192,14 +192,16 @@ Nothing in the app is tied to a particular model.
   you, not sent to the model. It works well on text and forms, and poorly on
   charts, maps, drawings, icon-only buttons and canvas apps.
 - **"Let the model see the screen"** (Permissions tab, per agent, off by
-  default): after each browser action the model also gets a screenshot of the
-  page, with the element numbers drawn on it, and can click and type at a
-  position for what has no number, including inside embedded frames. Only the
-  latest two screenshots are sent, and none are stored in the conversation
-  history. Everything visible goes to the model provider, and each step takes
-  longer and costs more. It needs a model that reads images and uses tools
-  (Claude, Gemini, GPT-4o, or locally for example `qwen3-vl`); small local
-  models see the page but are imprecise about where things are.
+  default): the agent can look at the browser when it decides it needs to. It
+  calls for a screenshot, receives it with the element numbers drawn on it,
+  and can then click and type at a position for what has no number, including
+  inside embedded frames. Every action still returns the page's text and
+  elements, so it only looks when that is not enough. Only its latest two
+  screenshots are sent, and none are stored in the conversation history.
+  Everything visible on a screenshot it takes goes to the model provider. It
+  needs a model that reads images and uses tools (Claude, Gemini, GPT-4o, or
+  locally for example `qwen3-vl`); small local models see the page but are
+  imprecise about where things are.
 
 Models differ a great deal in how reliably they use tools. The action list in
 each conversation shows what an agent actually did, independent of what it

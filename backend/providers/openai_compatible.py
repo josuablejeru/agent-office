@@ -224,7 +224,8 @@ class OpenAICompatibleProvider(ModelProvider):
                     f"Could not connect to the model server at {self._base_url}. Is it running?"
                 ) from exc
             raise ProviderError(
-                f"request to {self._base_url} failed: {exc or type(exc).__name__}"
+                # Some errors (a read timeout) have no message of their own: name them instead.
+                f"request to {self._base_url} failed: {str(exc) or type(exc).__name__}"
             ) from exc
         if response.status_code >= 400:
             # Provider error bodies describe the problem and never echo the key.

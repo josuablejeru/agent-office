@@ -95,18 +95,19 @@ def executor(tmp_path: Path, vision: bool) -> tuple[GuestToolExecutor, FakeGuest
     return GuestToolExecutor(guest, tools_for(agent), tmp_path / "shots", vision=vision), guest  # type: ignore[arg-type]
 
 
-def test_with_sight_each_browser_action_is_followed_by_a_marked_screenshot(tmp_path: Path) -> None:
+def test_with_sight_the_model_looks_when_it_chooses_to(tmp_path: Path) -> None:
     run, guest = executor(tmp_path, vision=True)
-    result = asyncio.run(run.execute(ToolCallRequest(id="1", name="browser_goto", arguments={"url": "https://x"})))
-    assert guest.calls[-1] == ("browser.screenshot", {"marks": True})
+    asyncio.run(run.execute(ToolCallRequest(id="1", name="browser_goto", arguments={"url": "https://x"})))
+    assert [op for op, _ in guest.calls] == ["browser.goto"] and run.take_images() == []  # no look it did not ask for
+
+    result = asyncio.run(run.execute(ToolCallRequest(id="2", name="browser_screenshot", arguments={})))
+    assert guest.calls[-1] == ("browser.screenshot", {"marks": True})  # numbers drawn on what it sees
     assert run.take_images() == [IMAGE] and run.take_images() == []  # handed over once
     assert IMAGE not in json.dumps(result)  # the stored result never holds the image
     assert result["view"] == {"width": 1280, "height": 690} and (tmp_path / "shots" / result["screenshot"]).exists()
 
-    asyncio.run(run.execute(ToolCallRequest(id="2", name="browser_screenshot", arguments={})))
-    assert guest.calls[-1] == ("browser.screenshot", {"marks": True}) and len(run.take_images()) == 1
     asyncio.run(run.execute(ToolCallRequest(id="3", name="browser_click_at", arguments={"x": 10, "y": 20})))
-    assert ("browser.click_at", {"x": 10, "y": 20}) in guest.calls
+    assert guest.calls[-1] == ("browser.click_at", {"x": 10, "y": 20}) and run.take_images() == []
 
 
 def test_without_sight_nothing_changes(tmp_path: Path) -> None:
@@ -122,7 +123,7 @@ def test_a_run_gives_the_model_the_image_and_stores_none(tmp_path: Path) -> None
     from tests.test_runs import ScriptedProvider, make_service
 
     provider = ScriptedProvider(
-        ModelResponse(tool_calls=[ToolCallRequest(id="c1", name="browser_goto", arguments={"url": "https://x"})]),
+        ModelResponse(tool_calls=[ToolCallRequest(id="c1", name="browser_screenshot", arguments={})]),
         ModelResponse(text="The chart shows growth."),
     )
     service, engine, agent_id = make_service(tmp_path, provider)
@@ -145,7 +146,7 @@ def test_a_run_gives_the_model_the_image_and_stores_none(tmp_path: Path) -> None
     asyncio.run(scenario())
     second = provider.requests[1]
     assert second[-1].role == "tool" and second[-1].images == [IMAGE]
-    assert "You can see the screen" in second[0].content
+    assert "You can see the screen when you choose to" in second[0].content
     with Session(engine) as session:
         stored = session.exec(select(ToolCall)).one().result_json or ""
     assert IMAGE not in stored and "screenshot" in stored

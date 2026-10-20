@@ -374,6 +374,7 @@ def test_an_agent_that_sees_can_click_by_position_and_type(office: Office, team:
             tool("file_write", path="visual/index.html", content=VISUAL_PAGE),
             tool("shell_exec", command="cd ~/visual && python3 -m http.server 8898 >/dev/null 2>&1 & sleep 1; echo up"),
             tool("browser_goto", url="http://127.0.0.1:8898/index.html"),
+            tool("browser_screenshot"),                     # the model chooses to look
             tool("browser_click_at", x=123, y=45),          # on the canvas
             tool("browser_click_at", x=650, y=100),         # the button inside the frame
             tool("browser_click_at", x=100, y=360),         # into the editor, which has no label
@@ -387,13 +388,14 @@ def test_an_agent_that_sees_can_click_by_position_and_type(office: Office, team:
         assert "canvas 123,45" in page["text"]  # where it clicked is where the page saw the click
         assert "frame button pressed" in page["text"]
         assert "hello from the agent" in page["text"]
-        assert "screenshot" in result(run, 2) and result(run, 2)["view"]["width"] > 400
+        assert "screenshot" not in result(run, 2)  # opening the page brought no look it did not ask for
+        assert result(run, 3)["view"]["width"] > 400  # the screenshot it asked for
 
         # The model was shown the screen; nothing stored holds an image.
         last_request = office.model.requests["alice"][-1]["messages"]
         shown = [part for message in last_request if isinstance(message["content"], list)
                  for part in message["content"] if part.get("type") == "image_url"]
-        assert 1 <= len(shown) <= 2 and shown[0]["image_url"]["url"].startswith("data:image/jpeg;base64,/9j/")
+        assert len(shown) == 1 and shown[0]["image_url"]["url"].startswith("data:image/jpeg;base64,/9j/")
         assert "base64" not in json.dumps(run["tool_calls"])
         # The numbers drawn for the screenshot are gone from the page again.
         assert page["text"].strip().endswith(";")
