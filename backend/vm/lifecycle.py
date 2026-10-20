@@ -126,9 +126,12 @@ class QemuVMManager(VMManager):
         shutdown_timeout: float = 60.0,
         dns_settings: DnsSettings | None = None,
         certificates: CertificateBundle | None = None,
+        packages: DnsSettings | None = None,
     ) -> None:
         self.dns_settings = dns_settings
         self.certificates = certificates
+        # Returns where pip and npm should fetch from, or None for the public indexes.
+        self.packages = packages
         self._settings = settings
         self._command_lookup = command_lookup
         self._detect = detect
@@ -256,7 +259,10 @@ class QemuVMManager(VMManager):
         seed = self.seed_iso(agent)
         dns = await self.dns_settings() if self.dns_settings else None
         certificates = await self.certificates() if self.certificates else ""
-        await build_seed_iso(seed, agent.name, self.guest_secret(agent), dns=dns, certificates=certificates)
+        packages = await self.packages() if self.packages else None
+        await build_seed_iso(
+            seed, agent.name, self.guest_secret(agent), dns=dns, certificates=certificates, packages=packages
+        )
 
         spec = VMSpec(
             name=agent.name,

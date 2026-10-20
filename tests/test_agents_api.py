@@ -42,6 +42,9 @@ class FakeKeychain:
         account = args[args.index("-a") + 1]
         if args[0] == "find-generic-password" and account in self.items:
             return subprocess.CompletedProcess(args, 0, self.items[account] + "\n", "")
+        if args[0] == "delete-generic-password" and account in self.items:
+            del self.items[account]
+            return subprocess.CompletedProcess(args, 0, "", "")
         return subprocess.CompletedProcess(args, 44, "", "not found")
 
 

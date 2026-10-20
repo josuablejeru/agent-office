@@ -26,6 +26,7 @@ from guest.database import db_list, db_sql
 from guest.files import file_list, file_read, file_write
 from guest.memory import memory_context, memory_forget, memory_recall, memory_remember
 from guest.network import configure_dns
+from guest.packages import configure_packages
 from guest.shared import (
     ensure_shared_dir,
     shared_finish,
@@ -160,6 +161,7 @@ def main() -> None:
     configure_dns()
     # Before the browser opens: Chrome reads its certificate policy only at start.
     configure_certificates()
+    configure_packages()
     # Reachable only through QEMU's host-loopback port forward.
     host = os.environ.get("AGENTD_HOST", "0.0.0.0")
     port = int(os.environ.get("AGENTD_PORT", DEFAULT_PORT))

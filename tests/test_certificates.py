@@ -93,7 +93,6 @@ def guest_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[FakeSu
     monkeypatch.setattr(guest_certificates, "sudo", sudo)
     monkeypatch.setattr(guest_certificates, "BUNDLE_FILE", tmp_path / "host_ca.pem")
     monkeypatch.setattr(guest_certificates, "STORE_DIR", tmp_path / "store")
-    monkeypatch.setattr(guest_certificates, "PIP_CONF", tmp_path / "pip.conf")
     monkeypatch.setattr(guest_certificates, "ENVIRONMENT", tmp_path / "environment")
     return sudo, tmp_path
 
@@ -108,7 +107,7 @@ def test_roots_from_the_host_are_installed_everywhere(guest_files: tuple[FakeSud
     targets = [call[1] for call in sudo.calls if call[0] == "tee"]
     assert ("python3", "-c", guest_certificates.WRITE_FILES, str(home / "store")) in sudo.calls
     assert str(guest_certificates.CHROME_POLICY) in targets
-    assert str(home / "pip.conf") in targets and str(home / "environment") in targets
+    assert str(home / "environment") in targets
 
 
 def test_nothing_happens_when_nothing_changed(guest_files: tuple[FakeSudo, Path]) -> None:
@@ -127,11 +126,9 @@ def test_roots_the_host_no_longer_trusts_are_removed(guest_files: tuple[FakeSudo
     sudo, home = guest_files
     (home / "store").mkdir()
     (home / "store" / "host-01.crt").write_text("old")
-    (home / "pip.conf").write_text(guest_certificates.MARKER + "\n[global]\n")
     guest_certificates.configure_certificates()
     assert ("rm", "-rf", str(home / "store")) in sudo.calls
     assert ("rm", "-f", str(guest_certificates.CHROME_POLICY)) in sudo.calls
-    assert ("rm", "-f", str(home / "pip.conf")) in sudo.calls
     assert ("update-ca-certificates", "--fresh") in sudo.calls
 
 

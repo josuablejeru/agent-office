@@ -59,6 +59,22 @@ export interface Provider {
   credentials_found: boolean;
 }
 
+export interface PackageRepository {
+  url: string;
+  username: string;
+  pypi_repo: string;
+  npm_repo: string;
+  has_token: boolean;
+}
+
+export interface PackageRepositoryUpdate {
+  url: string;
+  username: string;
+  pypi_repo: string;
+  npm_repo: string;
+  token: string;
+}
+
 export interface DnsStatus {
   active: boolean;
   default_servers: string[];

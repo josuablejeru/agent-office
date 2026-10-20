@@ -44,7 +44,8 @@ def make_server(ca: x509.Certificate, ca_key: ec.EllipticCurvePrivateKey, direct
         .public_key(key.public_key()).serial_number(x509.random_serial_number())
         .not_valid_before(NOW - datetime.timedelta(days=1)).not_valid_after(NOW + datetime.timedelta(days=30))
         .add_extension(x509.SubjectAlternativeName([
-            x509.IPAddress(ipaddress.ip_address("10.0.2.2")), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+            x509.IPAddress(ipaddress.ip_address("10.0.2.2")), x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+            x509.DNSName("artifactory.e2e.test")]),
             critical=False)
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
         # Strict verifiers (Python 3.13) require these, as real certificates have them.

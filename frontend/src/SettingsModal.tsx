@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { ModelTest } from "./ModelTest";
+import { PackageRepositorySettings } from "./PackageRepository";
 import type { DnsStatus, Provider } from "./types";
 
 interface Props {
@@ -284,6 +285,9 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
           />
         </label>
         {certificateError && <p className="form-error">{certificateError}</p>}
+
+        <h4>Package repository</h4>
+        <PackageRepositorySettings />
 
         <h3>Model providers</h3>
         <p className="hint">

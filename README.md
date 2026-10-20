@@ -230,6 +230,16 @@ Settings shows the internal domains currently in effect.
   app's own connections to model providers use the Mac's trust settings.
   If your network also needs a proxy server configured, that is not
   supported yet.
+- **Company package repository (JFrog Artifactory).** Where pip and npm must
+  go through Artifactory, enter its address (up to `/artifactory`), your
+  username, a token and the repository names under Settings › Network ›
+  Package repository, and press Test. Agents' computers then use it for `pip`
+  and `npm` from their next start, and the system image build fetches the
+  agent software's Python packages through it. The token is kept in the
+  macOS Keychain, never in `config.yaml`, and is not left in the system
+  image; an agent can read it on its own computer, so use a read-only token.
+  In `config.yaml` the same settings (without the token) are under
+  `packages.artifactory`.
 - **Signing in is separate.** The agent's Chrome has none of your sessions or
   certificates. Use Take control to log in once; tools that require a
   company-managed device or a client certificate will refuse it.

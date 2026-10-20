@@ -312,6 +312,46 @@ def test_a_company_root_certificate_is_trusted_everywhere_on_the_agents_computer
     assert "ERR_CERT_AUTHORITY_INVALID" in untrusted.get("error", ""), untrusted
 
 
+def test_pip_fetches_through_the_company_repository_set_in_settings(office: Office, team: dict[str, int]) -> None:
+    from tests.fake_artifactory import FakeArtifactory
+
+    alice = team["alice"]
+    # Over HTTPS signed by the stand-in company root, as behind a company's inspection.
+    certs = office.home / "certs"
+    fake = FakeArtifactory("agent-bot", "read-only-token", tls=(str(certs / "intranet.pem"), str(certs / "intranet.key")))
+    try:
+        # A company repository has a name (pip will not check a certificate against a bare address).
+        form = {"url": fake.url("artifactory.e2e.test"), "username": "agent-bot", "pypi_repo": "pypi-remote",
+                "npm_repo": "npm-remote", "token": "read-only-token"}
+        assert office.api("PUT", "/api/system/packages", json=form).status_code == 200
+        office.api("POST", f"/api/agents/{alice}/vm/restart")
+        office.wait_until(lambda: office.api("GET", f"/api/agents/{alice}/vm/guest").json()["ready"], 120, "restart")
+
+        # A package that exists only in the company repository.
+        # Writing to /etc/hosts needs approval, which the user gives.
+        office.model.script("alice", [tool("shell_exec", command="echo '10.0.2.2 artifactory.e2e.test' | sudo -n tee -a /etc/hosts"), "ok"])
+        run_id = office.send(alice, "add the hosts entry")
+        office.wait_until(lambda: office.run(run_id)["pending_approval"] is not None, 30, "the approval request")
+        office.api("POST", f"/api/approvals/{office.run(run_id)['pending_approval']['id']}", json={"approved": True})
+        office.finished(run_id, 30)
+        command = ("python3 -m venv /tmp/probe && /tmp/probe/bin/pip install -q agent-office-probe && "
+                   "/tmp/probe/bin/python -c 'import agent_office_probe as p; print(p.MESSAGE)'; "
+                   "grep -c registry= ~/.npmrc")
+        done = shell(office, "alice", alice, command)
+        assert done["stdout"].splitlines() == ["served by the company repository", "1"], done["stderr"][-800:]
+        assert any(path.endswith(".whl") for path in fake.paths(authorized=True))
+
+        # Removed in Settings: back to the public index after the next start.
+        assert office.api("DELETE", "/api/system/packages").status_code == 204
+        office.api("POST", f"/api/agents/{alice}/vm/restart")
+        office.wait_until(lambda: office.api("GET", f"/api/agents/{alice}/vm/guest").json()["ready"], 120, "restart")
+        after = shell(office, "alice", alice, "cat /etc/pip.conf 2>&1; ls ~/.npmrc 2>&1")["stdout"]
+        assert "index-url" not in after and "No such file" in after
+    finally:
+        fake.close()
+        office.api("DELETE", "/api/system/packages")
+
+
 def test_turning_a_computer_off_stops_the_agents_task(office: Office, team: dict[str, int]) -> None:
     bob = team["bob"]
     office.model.script("bob", [tool("shell_exec", command="sleep 120"), "never reached"])

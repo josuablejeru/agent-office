@@ -6,6 +6,8 @@ import type {
   ChannelMessage,
   DnsStatus,
   MemoryView,
+  PackageRepository,
+  PackageRepositoryUpdate,
   PermissionsInfo,
   ModelCheck,
   ModelStatus,
@@ -138,6 +140,12 @@ export const api = {
   postToChannel: (id: number, content: string) =>
     request<ChannelMessage>(`/api/channels/${id}/messages`, post({ content })),
   dnsStatus: () => request<DnsStatus>("/api/system/dns"),
+  packageRepository: () => request<PackageRepository>("/api/system/packages"),
+  savePackageRepository: (payload: PackageRepositoryUpdate) =>
+    request<PackageRepository>("/api/system/packages", { method: "PUT", body: JSON.stringify(payload) }),
+  testPackageRepository: (payload: PackageRepositoryUpdate) =>
+    request<{ ok: boolean; detail: string }>("/api/system/packages/test", post(payload)),
+  removePackageRepository: () => request<void>("/api/system/packages", { method: "DELETE" }),
   addCertificate: async (file: File) => {
     const response = await fetch("/api/system/certificates", {
       method: "POST",

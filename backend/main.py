@@ -32,6 +32,7 @@ from backend.keystore import KeyStore
 from backend.logging_config import configure_logging, get_logger
 from backend.net.certificates import CertificateSource
 from backend.net.dns import DnsForwarder
+from backend.net.packages import PackageSource
 from backend.policy.approvals import ApprovalBroker
 from backend.policy.setup import build_policy_engine
 from backend.providers.base import ModelProvider
@@ -122,7 +123,12 @@ def create_app(
     )
     app.state.vm_manager.certificates = app.state.certificates.bundle
     app.state.key_store = key_store
-    app.state.base_image_builder = BaseImageBuilder(settings, certificates=app.state.certificates.bundle)
+    # A company package repository (Artifactory), when one is set up in Settings.
+    package_source = PackageSource(settings, key_store)
+    app.state.vm_manager.packages = package_source.guest_settings
+    app.state.base_image_builder = BaseImageBuilder(
+        settings, certificates=app.state.certificates.bundle, pip_index_url=package_source.pip_index_url
+    )
     app.state.approvals = ApprovalBroker()
     app.state.channels = ChannelService(engine)
 

@@ -1381,3 +1381,13 @@ textarea:focus {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+.package-repository {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hint.ok {
+  color: var(--ok);
+}

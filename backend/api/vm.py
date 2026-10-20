@@ -21,6 +21,7 @@ from backend.api.deps import (
 from backend.db.models import Agent
 from backend.keystore import KeyStoreError
 from backend.logging_config import get_logger
+from backend.net import packages
 from backend.providers.base import ProviderError
 from backend.providers.check import ModelCheck, check_model
 from backend.providers.registry import build_provider
@@ -200,6 +201,82 @@ async def dns_status(request: Request) -> DnsStatus:
 
 
 # Company bundles can hold hundreds of certificates.
+class PackageRepository(BaseModel):
+    """The company package repository, as Settings shows it (never the token itself)."""
+
+    url: str = ""
+    username: str = ""
+    pypi_repo: str = ""
+    npm_repo: str = ""
+    has_token: bool = False
+
+
+class PackageRepositoryUpdate(BaseModel):
+    url: str
+    username: str
+    pypi_repo: str
+    npm_repo: str = ""
+    # Left empty to keep the token already stored.
+    token: str = Field(default="", max_length=4096)
+
+
+@router.get("/system/packages")
+async def get_package_repository(settings: SettingsDep, keys: KeyStoreDep) -> PackageRepository:
+    repository = packages.load(settings)
+    if repository is None:
+        return PackageRepository(has_token=keys.has(packages.TOKEN_KEY))
+    return PackageRepository(**repository.model_dump(), has_token=keys.has(packages.TOKEN_KEY))
+
+
+def _validated(payload: PackageRepositoryUpdate) -> packages.Artifactory:
+    try:
+        return packages.Artifactory(
+            url=payload.url, username=payload.username.strip(),
+            pypi_repo=payload.pypi_repo.strip(), npm_repo=payload.npm_repo.strip(),
+        )
+    except ValueError as exc:
+        first = exc.errors()[0] if hasattr(exc, "errors") else {}
+        field = ".".join(str(part) for part in first.get("loc", ())) or "settings"
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{field}: {first.get('msg', exc)}") from exc
+
+
+@router.put("/system/packages")
+async def set_package_repository(
+    payload: PackageRepositoryUpdate, settings: SettingsDep, keys: KeyStoreDep
+) -> PackageRepository:
+    """Use a company Artifactory for pip and npm on agents' computers and in the image build."""
+    repository = _validated(payload)
+    if payload.token.strip():
+        try:
+            keys.set(packages.TOKEN_KEY, payload.token.strip())
+        except KeyStoreError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    elif not keys.has(packages.TOKEN_KEY):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "token: enter the Artifactory token")
+    settings.update_user_config(packages.CONFIG_PATH, repository.model_dump())
+    log.info("package repository set", extra={"host": repository.url.split("/")[2]})
+    return await get_package_repository(settings, keys)
+
+
+@router.delete("/system/packages", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_package_repository(settings: SettingsDep, keys: KeyStoreDep) -> None:
+    settings.update_user_config(packages.CONFIG_PATH, None)
+    keys.delete(packages.TOKEN_KEY)
+    log.info("package repository removed")
+
+
+@router.post("/system/packages/test")
+async def test_package_repository(
+    payload: PackageRepositoryUpdate, keys: KeyStoreDep
+) -> packages.CheckResult:
+    """Check the settings as entered (before saving), with the stored token if none is given."""
+    repository = _validated(payload)
+    token = payload.token.strip() or keys.get(packages.TOKEN_KEY)
+    if not token:
+        return packages.CheckResult(ok=False, detail="Enter the Artifactory token.")
+    return await packages.check(repository, token)
+
+
 MAX_CERTIFICATE_BYTES = 10 * 1024 * 1024
 
 

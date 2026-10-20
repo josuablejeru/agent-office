@@ -4,7 +4,8 @@ Behind a company's HTTPS inspection every secure connection is signed by the
 company's own root. The host puts the roots it trusts into `host_ca.pem` next
 to this file on every start. They are installed for the command line (the
 system store, plus the variables pip, requests and Node read) and for Chrome,
-which on Linux takes them only through its `CACertificates` policy. Without
+which on Linux takes them only through its `CACertificates` policy. (pip's
+settings, which also name the system's roots, are written by guest/packages.py.) Without
 the file, everything this module added is removed again.
 """
 
@@ -23,7 +24,6 @@ BUNDLE_FILE = Path(__file__).with_name("host_ca.pem")
 STORE_DIR = Path("/usr/local/share/ca-certificates/agent-office")
 SYSTEM_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 CHROME_POLICY = Path("/etc/opt/chrome/policies/managed/agent-office-certificates.json")
-PIP_CONF = Path("/etc/pip.conf")
 ENVIRONMENT = Path("/etc/environment")
 MARKER = "# agent-office: trust the host's extra root certificates"
 ENV_VARIABLES = ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS")
@@ -91,12 +91,9 @@ def configure_certificates() -> None:
     if wanted:
         ok = ok and sudo("mkdir", "-p", str(CHROME_POLICY.parent))
         ok = ok and sudo("tee", str(CHROME_POLICY), stdin=chrome_policy(wanted))
-        ok = ok and sudo("tee", str(PIP_CONF), stdin=f"{MARKER}\n[global]\ncert = {SYSTEM_BUNDLE}\n")
         ok = ok and sudo("tee", str(ENVIRONMENT), stdin=environment_with_ours(_read(ENVIRONMENT)))
     else:
         ok = ok and sudo("rm", "-f", str(CHROME_POLICY))
-        if _read(PIP_CONF).startswith(MARKER):
-            ok = ok and sudo("rm", "-f", str(PIP_CONF))
         ok = ok and sudo("tee", str(ENVIRONMENT), stdin=environment_without_ours(_read(ENVIRONMENT)))
     if ok:
         log.info("extra root certificates: %d installed", len(wanted))

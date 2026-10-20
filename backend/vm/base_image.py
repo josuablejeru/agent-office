@@ -36,10 +36,12 @@ class BaseImageBuilder:
         settings: Settings,
         script: Path = BUILD_SCRIPT,
         certificates: Callable[[], Awaitable[str]] | None = None,
+        pip_index_url: Callable[[], Awaitable[str]] | None = None,
     ) -> None:
         self._settings = settings
         self._script = script
         self._certificates = certificates
+        self._pip_index_url = pip_index_url
         self._task: asyncio.Task[None] | None = None
         self._detail = ""
 
@@ -156,6 +158,10 @@ class BaseImageBuilder:
             extra.parent.mkdir(parents=True, exist_ok=True)
             extra.write_text(bundle)
             env["EXTRA_CA_FILE"] = str(extra)
+        # Python packages for the agent software come through the company repository, if any.
+        index = await self._pip_index_url() if self._pip_index_url else ""
+        if index:
+            env["PIP_INDEX_URL"] = index
         with self.log_path.open("w") as build_log:
             process = await asyncio.create_subprocess_exec(
                 "/bin/bash", str(self._script),

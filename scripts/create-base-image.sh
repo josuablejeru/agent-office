@@ -13,6 +13,9 @@
 #   EXTRA_CA_FILE=roots.pem   also trust these root certificates while
 #             downloading (a company network that inspects HTTPS); the app
 #             passes the roots this Mac trusts beyond the public ones
+#   PIP_INDEX_URL=https://user:token@host/artifactory/api/pypi/repo/simple
+#             fetch the agent software's Python packages from a company
+#             repository instead of the public index (set in the app's Settings)
 set -euo pipefail
 
 HOME_DIR="${AGENT_OFFICE_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-office}"
@@ -131,6 +134,13 @@ if $EXTRA_CA; then
     /-----END CERTIFICATE-----/ { close(file); file = "" }
   ' "$EXTRA_CA_FILE"
   echo "    $(ls "$WORK_DIR/seed/certs" | wc -l | tr -d ' ') certificates"
+fi
+if [ -n "${PIP_INDEX_URL:-}" ]; then
+  echo "==> Python packages come from the company repository ($(printf '%s' "$PIP_INDEX_URL" | sed -E 's#^(https?://)[^@/]*@#\1#; s#^(https?://[^/]+).*#\1#'))"
+  # On the seed disk, not in the cloud-init settings: those are kept inside the
+  # image, and the credentials must not be.
+  mkdir "$WORK_DIR/seed/packages"
+  (umask 077 && printf '%s\n' "$PIP_INDEX_URL" >"$WORK_DIR/seed/packages/pip-index-url")
 fi
 cat >"$WORK_DIR/seed/meta-data" <<EOF
 instance-id: agent-office-base-build
@@ -251,8 +261,17 @@ write_files:
 runcmd:
   - mkdir -p /etc/agent-office /opt/agent-office
   - python3 -m venv $GUEST_VENV
-  # pip brings its own list of roots; point it at the system's, which has any extra ones.
-  - PIP_CERT=/etc/ssl/certs/ca-certificates.crt $GUEST_VENV/bin/pip install --no-cache-dir ${GUEST_PIP_PACKAGES[*]}
+  # pip brings its own list of roots; point it at the system's, which has any extra
+  # ones. A company repository, if given, is read from the seed disk.
+  - |
+    mkdir -p /run/agent-office-seed && mount -o ro -L cidata /run/agent-office-seed 2>/dev/null || true
+    if [ -s /run/agent-office-seed/packages/pip-index-url ]; then
+      export PIP_INDEX_URL="\$(cat /run/agent-office-seed/packages/pip-index-url)"
+      # pip ignores an index without HTTPS unless its host is named as trusted.
+      case "\$PIP_INDEX_URL" in http://*) export PIP_TRUSTED_HOST="\$(echo "\$PIP_INDEX_URL" | sed -E 's#^http://([^@/]*@)?([^/:]+).*#\\2#')" ;; esac
+    fi
+    umount /run/agent-office-seed 2>/dev/null || true
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt $GUEST_VENV/bin/pip install --no-cache-dir ${GUEST_PIP_PACKAGES[*]}
   - curl -fsSL -o /tmp/chrome.deb $CHROME_DEB_URL
   - DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/chrome.deb
   - rm -f /tmp/chrome.deb
