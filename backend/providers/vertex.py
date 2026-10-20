@@ -82,7 +82,12 @@ def describe_google_error(exc: Exception) -> str:
 
 
 def openai_base_url(project: str, region: str) -> str:
-    host = "aiplatform.googleapis.com" if region == "global" else f"{region}-aiplatform.googleapis.com"
+    # As Google's SDKs do: one global endpoint, the EU and US multi-regions, or a single region.
+    host = {
+        "global": "aiplatform.googleapis.com",
+        "eu": "aiplatform.eu.rep.googleapis.com",
+        "us": "aiplatform.us.rep.googleapis.com",
+    }.get(region, f"{region}-aiplatform.googleapis.com")
     return f"https://{host}/v1/projects/{project}/locations/{region}/endpoints/openapi"
 
 

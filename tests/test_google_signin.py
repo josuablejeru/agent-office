@@ -116,3 +116,10 @@ def test_model_names_for_the_vertex_provider_are_checked_and_completed() -> None
         vertex.vertex_model_id("claude-opus-5-5")
     with pytest.raises(ProviderError, match="publisher/model"):
         vertex.vertex_model_id("mystery-model")
+
+
+def test_multi_regions_get_the_same_addresses_as_googles_sdks() -> None:
+    assert vertex.openai_base_url("p", "eu").startswith("https://aiplatform.eu.rep.googleapis.com/v1/projects/p/locations/eu/")
+    assert vertex.openai_base_url("p", "us").startswith("https://aiplatform.us.rep.googleapis.com/")
+    assert vertex.openai_base_url("p", "global").startswith("https://aiplatform.googleapis.com/")
+    assert vertex.openai_base_url("p", "europe-west4").startswith("https://europe-west4-aiplatform.googleapis.com/")

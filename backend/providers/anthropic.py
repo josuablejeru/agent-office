@@ -138,8 +138,8 @@ class AnthropicProvider(ModelProvider):
             if self._label == "vertex":
                 hint = (
                     " On Vertex AI this usually means the project has no quota for this model in this "
-                    "region: try the region Claude Code uses (CLOUD_ML_REGION), or request quota in the "
-                    "Google Cloud console (IAM & Admin › Quotas)."
+                    "region: try the region Claude Code uses (CLOUD_ML_REGION), such as the multi-regions "
+                    "eu or us, or request quota in the Google Cloud console (IAM & Admin › Quotas)."
                 )
             raise ProviderError(f"Rate limit or quota reached: {said}.{hint}") from exc
         except anthropic.APIStatusError as exc:
