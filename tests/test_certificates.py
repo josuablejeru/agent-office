@@ -256,5 +256,6 @@ def test_a_company_bundle_of_hundreds_of_certificates_is_accepted(tmp_path: Path
 
     for encoding in (Encoding.PEM, Encoding.DER):  # PKCS#7, as IT sometimes ships it under .crt
         packed = p7.serialize_certificates(roots[:3], encoding)
-        assert [c.subject for c in read_any(packed)] == [r.subject for r in roots[:3]]
+        # A PKCS#7 set has no fixed order: which OpenSSL wrote it decides.
+        assert {c.subject for c in read_any(packed)} == {r.subject for r in roots[:3]}
     assert read_any(b"\x30\x82garbage") == []
