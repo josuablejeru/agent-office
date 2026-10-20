@@ -58,7 +58,8 @@ builds `Agent Office.app` and installs it into `/Applications`. Open it like
 any other app. It starts the backend itself and shows the UI in its own window.
 
 - **First start on a new Mac:** the window offers to build the system image
-  agents boot from (about 1 GB of downloads, several minutes). Where that is
+  agents boot from (about 400 MB of downloads; a minute or two on a fast
+  connection; "Show details" follows its progress). Where that is
   not possible, "Use an image file…" takes an image built on another Mac: copy
   `~/.config/agent-office/images/debian-desktop.qcow2` from there.
 - **Quitting** shuts every agent's computer down cleanly; disks are kept, so

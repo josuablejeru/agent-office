@@ -70,7 +70,7 @@ export function SetupBanner() {
     <div className="notice setup">
       <div>
         <strong>One-time setup.</strong> Agents need a system image for their computers (Debian with
-        a desktop and Chrome). Building it downloads about 1 GB and takes several minutes.
+        a desktop and Chrome). Building it downloads about 400 MB and takes a few minutes.
         {status.detail && <div className="setup-detail">{status.detail}</div>}
         {problem && <div className="setup-detail">The image could not be used: {problem}</div>}
         {(status.building || status.detail) && (

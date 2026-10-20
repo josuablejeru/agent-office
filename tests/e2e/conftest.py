@@ -33,7 +33,8 @@ import yaml
 from backend.config import Settings
 
 REPO = Path(__file__).resolve().parents[2]
-BASE_IMAGE = Settings.from_env().base_image_path("debian-desktop")
+# AGENT_OFFICE_E2E_IMAGE tests a freshly built image instead of the installed one.
+BASE_IMAGE = Path(os.environ.get("AGENT_OFFICE_E2E_IMAGE") or Settings.from_env().base_image_path("debian-desktop"))
 FAKE_INTERNAL_ADDRESS = "10.9.8.7"
 
 

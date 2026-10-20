@@ -158,6 +158,11 @@ bootcmd:
   - [sh, -c, "mkdir -p /run/agent-office-ca /usr/local/share/ca-certificates/agent-office && mount -o ro -L cidata /run/agent-office-ca && cp /run/agent-office-ca/certs/*.crt /usr/local/share/ca-certificates/agent-office/ ; umount /run/agent-office-ca ; update-ca-certificates"]
 CA
 fi)
+# Only what is asked for: "recommended" extras (scanner support, boot
+# splash, printing...) would add hundreds of packages and over a gigabyte.
+apt:
+  conf: |
+    APT::Install-Recommends "false";
 package_update: true
 packages:
 $(printf '  - %s\n' "${PACKAGES[@]}")
@@ -260,6 +265,8 @@ runcmd:
   - dpkg -s ${PACKAGES[*]} >/dev/null && $GUEST_VENV/bin/python -c "import websockets, playwright" && test -x /usr/bin/google-chrome && echo $OK_MARKER >/dev/ttyAMA0
   # Each agent computer receives the current roots from the app at every start.
   - rm -rf /usr/local/share/ca-certificates/agent-office && update-ca-certificates --fresh >/dev/null
+  # Hand unused blocks back, so the finished image holds only real data.
+  - fstrim -av || true
   # Each agent overlay must generate its own machine-id on first boot.
   - truncate -s 0 /etc/machine-id
   - rm -f /var/lib/dbus/machine-id
@@ -275,7 +282,7 @@ echo "==> Installing the desktop, Chrome and the agent software inside the VM"
 qemu-system-aarch64 \
   -machine virt -accel hvf -cpu host -smp "$BUILD_CPUS" -m "$BUILD_MEMORY_MB" \
   -bios "$FIRMWARE" \
-  -drive "if=none,id=hd0,file=$WORK_DIR/disk.qcow2,format=qcow2" \
+  -drive "if=none,id=hd0,file=$WORK_DIR/disk.qcow2,format=qcow2,discard=unmap" \
   -device virtio-blk-pci,drive=hd0,bootindex=0 \
   -drive "if=none,id=seed,file=$WORK_DIR/seed.iso,format=raw,readonly=on" \
   -device virtio-blk-pci,drive=seed \
@@ -315,6 +322,10 @@ if ! grep -q "$OK_MARKER" "$WORK_DIR/console.log"; then
   die "provisioning did not complete; see $IMAGES_DIR/$IMAGE_NAME.build-failed.log"
 fi
 
+took
+echo "==> Compacting the image"
+qemu-img convert -O qcow2 "$WORK_DIR/disk.qcow2" "$WORK_DIR/compact.qcow2"
+mv "$WORK_DIR/compact.qcow2" "$WORK_DIR/disk.qcow2"
 took
 rm -f "$BASE_IMAGE"
 mv "$WORK_DIR/disk.qcow2" "$BASE_IMAGE"
