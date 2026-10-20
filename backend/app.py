@@ -24,6 +24,7 @@ from backend.instance import is_running
 from backend.logging_config import get_logger
 from backend.main import create_app
 from backend.notify import Notifier
+from backend.shell_env import import_login_environment
 from backend.vm.ports import LOOPBACK
 
 log = get_logger("app")
@@ -142,6 +143,9 @@ def on_window_ready(window: Any) -> None:
 
 def main() -> int:
     extend_path()
+    # Opened from Finder, the app misses what the user's shell sets (gcloud's
+    # folder, credentials file, proxy).
+    import_login_environment()
     ui_dir = Path(os.environ.get(UI_DIR_ENV_VAR) or DEFAULT_UI_DIR)
     if not (ui_dir / "index.html").is_file():
         print(f"The UI has not been built: {ui_dir} (run `npm run build` in frontend/)", file=sys.stderr)

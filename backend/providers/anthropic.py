@@ -135,10 +135,19 @@ class AnthropicProvider(ModelProvider):
         except anthropic.APIStatusError as exc:
             raise ProviderError(f"The API returned HTTP {exc.status_code}: {exc.message}") from exc
         except anthropic.APIConnectionError as exc:
-            raise ProviderError("Could not reach the model API.") from exc
+            cause = exc.__cause__ or exc.__context__
+            reason = f" ({type(cause).__name__}: {' '.join(str(cause).split())[:200]})" if cause else ""
+            raise ProviderError(f"Could not reach the model API{reason}.") from exc
         except ProviderError:
             raise
         except Exception as exc:  # noqa: BLE001 - e.g. Google credential refresh on Vertex
+            # Claude on Vertex signs in to Google Cloud on the first request.
+            from google.auth.exceptions import GoogleAuthError
+
+            if isinstance(exc, GoogleAuthError):
+                from backend.providers.vertex import describe_google_error
+
+                raise ProviderError(describe_google_error(exc)) from exc
             raise ProviderError(f"The model request failed: {exc}") from exc
 
     async def chat(

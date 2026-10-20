@@ -1,6 +1,6 @@
 [project]
 name = "agent-office"
-version = "0.2.4"
+version = "0.2.5"
 description = "Local-first agents, each with its own persistent QEMU VM"
 requires-python = ">=3.12"
 dependencies = [

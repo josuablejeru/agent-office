@@ -174,7 +174,14 @@ Nothing in the app is tied to a particular model.
   one small request and says whether the model is reachable and whether it
   makes tool calls, which agents depend on. Failures show the reason (no key,
   not signed in, model not found, server not reachable).
-- **Vertex AI** uses no API key. Set the project and region in Settings and
+- **Vertex AI** uses no API key. The app looks for Google's Application
+  Default Credentials where gcloud and Claude Code do: the file named in
+  `GOOGLE_APPLICATION_CREDENTIALS`, else `application_default_credentials.json`
+  in `CLOUDSDK_CONFIG` or `~/.config/gcloud`. Opened from Finder, it reads
+  those variables (and `HTTPS_PROXY`/`NO_PROXY`) from your login shell, fish
+  included. The Test button says why a sign-in fails: none found (and where
+  it looked), expired, or Google not reachable.
+- **Vertex AI** setup: Set the project and region in Settings and
   sign in once with `gcloud auth application-default login`. Model ids are
   what Vertex calls them, for example `google/gemini-2.5-pro` for the `vertex`
   type and a Claude model id for `vertex-anthropic`.

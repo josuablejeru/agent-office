@@ -13,6 +13,7 @@ Credentials: run `gcloud auth application-default login` once on this Mac.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -33,10 +34,51 @@ LOGIN_HINT = "Run `gcloud auth application-default login` on this Mac."
 TokenSource = Callable[[], Awaitable[str]]
 
 
+def credentials_file() -> tuple[Path, str]:
+    """Where Google's libraries look for Application Default Credentials, and why there."""
+    explicit = os.environ.get(ADC_ENV_VAR)
+    if explicit:
+        return Path(explicit).expanduser(), f"{ADC_ENV_VAR}"
+    config_dir = os.environ.get("CLOUDSDK_CONFIG")
+    if config_dir:
+        return Path(config_dir).expanduser() / ADC_USER_FILE.name, "CLOUDSDK_CONFIG"
+    return ADC_USER_FILE, "gcloud's default folder"
+
+
 def credentials_available() -> bool:
     """Whether Application Default Credentials appear to be set up (no network call)."""
-    explicit = os.environ.get(ADC_ENV_VAR)
-    return bool(explicit and Path(explicit).is_file()) or ADC_USER_FILE.is_file()
+    return credentials_file()[0].is_file()
+
+
+def credentials_summary() -> str:
+    """Where the credentials are and what kind, in a sentence (never their contents)."""
+    path, why = credentials_file()
+    if not path.is_file():
+        return f"No credentials file at {path} (looked there because of {why})."
+    try:
+        kind = str(json.loads(path.read_text()).get("type", "unknown"))
+    except (OSError, ValueError):
+        kind = "unreadable"
+    return f"Credentials: {path} (type {kind}, found through {why})."
+
+
+def describe_google_error(exc: Exception) -> str:
+    """Why Google sign-in failed, in words someone can act on."""
+    from google.auth import exceptions
+
+    message = " ".join(str(exc).split())[:300]
+    if isinstance(exc, exceptions.DefaultCredentialsError):
+        return f"No usable Google Cloud credentials. {credentials_summary()} {LOGIN_HINT}"
+    if isinstance(exc, exceptions.RefreshError) and any(
+        word in message for word in ("invalid_grant", "reauth", "Reauthentication", "expired")
+    ):
+        return f"Your Google Cloud sign-in has expired ({message}). {LOGIN_HINT} {credentials_summary()}"
+    if isinstance(exc, exceptions.TransportError):
+        return (
+            f"Google's sign-in service could not be reached ({message}). On a company network this is "
+            "often a proxy or certificate setting. " + credentials_summary()
+        )
+    return f"Google Cloud sign-in failed: {type(exc).__name__}: {message}. {credentials_summary()}"
 
 
 def openai_base_url(project: str, region: str) -> str:
@@ -62,7 +104,8 @@ class GoogleTokenSource:
             if not self._credentials.valid:
                 self._credentials.refresh(Request())
         except GoogleAuthError as exc:
-            raise ProviderError(f"Google Cloud credentials are not usable. {LOGIN_HINT}") from exc
+            self._credentials = None  # look again next time: the user may have signed in meanwhile
+            raise ProviderError(describe_google_error(exc)) from exc
         return str(self._credentials.token)
 
     async def __call__(self) -> str:
@@ -118,5 +161,5 @@ def build_vertex_anthropic(
     except Exception as exc:  # noqa: BLE001 - credential discovery can fail in several ways
         if isinstance(exc, ProviderError):
             raise
-        raise ProviderError(f"Google Cloud credentials are not usable. {LOGIN_HINT}") from exc
+        raise ProviderError(describe_google_error(exc)) from exc
     return AnthropicProvider(model, max_tokens=max_tokens, client=client, label="vertex")

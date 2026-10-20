@@ -25,7 +25,7 @@ from backend.net import packages
 from backend.providers.base import ProviderError
 from backend.providers.check import ModelCheck, check_model
 from backend.providers.registry import build_provider
-from backend.providers.vertex import LOGIN_HINT, credentials_available
+from backend.providers.vertex import LOGIN_HINT, credentials_available, credentials_summary
 from backend.vm.base_image import BaseImageStatus
 from backend.vm.capabilities import Capabilities, detect_capabilities
 from backend.vm.errors import VMError
@@ -325,7 +325,7 @@ async def model_status(
         if not provider.project:
             return ModelStatus(ok=False, detail="Set a Google Cloud project for this provider in Settings.")
         if not credentials_available():
-            return ModelStatus(ok=False, detail=f"No Google Cloud credentials found. {LOGIN_HINT}")
+            return ModelStatus(ok=False, detail=f"No Google Cloud credentials found. {credentials_summary()} {LOGIN_HINT}")
         return ModelStatus(ok=True)
     try:
         instance = build_provider(agent.provider, provider, agent.model, keys.get)
