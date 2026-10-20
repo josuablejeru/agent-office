@@ -192,7 +192,7 @@ def test_artifactory_is_set_up_tested_and_removed_in_settings(client: Any) -> No
 
         assert client.delete("/api/system/packages").status_code == 204
         assert client.get("/api/system/packages").json() == {
-            "url": "", "username": "", "pypi_repo": "", "npm_repo": "", "has_token": False}
+            "url": "", "username": "", "pypi_repo": "", "npm_repo": "", "base_image": "", "has_token": False}
         assert asyncio.run(client.app_state.vm_manager.packages()) is None
     finally:
         fake.close()
@@ -203,3 +203,115 @@ def test_a_repository_without_https_is_named_as_trusted_for_pip() -> None:
     assert plain["pip_trusted_host"] == "artifactory.corp.example"
     assert "trusted-host = artifactory.corp.example" in (guest_packages.render_pip_conf(plain, False) or "")
     assert "pip_trusted_host" not in Artifactory(**REPO).guest_settings("t")
+
+
+# --- a company base image from Artifactory -----------------------------------------------------
+
+
+def published_image(tmp_path: Path) -> tuple[FakeArtifactory, Artifactory, Path]:
+    image = tmp_path / "agent-base-arm64.qcow2"
+    image.write_bytes(b"QFI\xfb" + b"\0" * 4096)
+    fake = FakeArtifactory("jo", "tok")
+    fake.publish("hardened/debian/13/agent-base-arm64.qcow2", image)
+    repository = Artifactory(url=fake.url(), username="jo", pypi_repo="pypi-remote",
+                             base_image="hardened/debian/13/agent-base-arm64.qcow2")
+    return fake, repository, image
+
+
+def test_the_base_image_checksum_comes_from_artifactory(tmp_path: Path) -> None:
+    import hashlib
+
+    from backend.net.packages import ImageError, image_info
+
+    fake, repository, image = published_image(tmp_path)
+    try:
+        expected = hashlib.sha256(image.read_bytes()).hexdigest()
+        found = asyncio.run(image_info(repository, "tok"))
+        assert found.sha256 == expected and found.size == image.stat().st_size
+        assert found.url == f"{fake.url()}/hardened/debian/13/agent-base-arm64.qcow2"
+
+        fake.storage_api = False  # a remote repository that has not cached it: the header is used
+        assert asyncio.run(image_info(repository, "tok")).sha256 == expected
+
+        fake.checksum_header = False  # no checksum anywhere: refused, never used unverified
+        with pytest.raises(ImageError, match="no SHA-256"):
+            asyncio.run(image_info(repository, "tok"))
+
+        fake.storage_api, fake.checksum_header = True, True
+        with pytest.raises(ImageError, match="refused the username or token"):
+            asyncio.run(image_info(repository, "wrong"))
+        with pytest.raises(ImageError, match="There is no file"):
+            asyncio.run(image_info(repository.model_copy(update={"base_image": "hardened/nope/x.qcow2"}), "tok"))
+    finally:
+        fake.close()
+
+
+def test_the_build_gets_the_image_and_a_private_credentials_file(tmp_path: Path) -> None:
+    from backend.keystore import KeyStore
+    from backend.net.packages import PackageSource
+    from tests.test_agents_api import FakeKeychain
+
+    fake, repository, _ = published_image(tmp_path)
+    try:
+        settings = Settings(home=tmp_path / "home")
+        settings.ensure_layout()
+        settings.update_user_config(["packages", "artifactory"], repository.model_dump())
+        keys = KeyStore(run=FakeKeychain())
+        keys.set("ARTIFACTORY_TOKEN", "tok")
+        script = tmp_path / "build.sh"
+        script.write_text(
+            "#!/bin/bash\n"
+            'echo "url=$BASE_IMAGE_URL sha=${BASE_IMAGE_SHA256:0:8} name=$BASE_IMAGE_NAME"\n'
+            'echo "mode=$(stat -f %Lp "$BASE_IMAGE_CURL_CONFIG")"\n'
+            'grep -c "user = " "$BASE_IMAGE_CURL_CONFIG"\n'
+        )
+        source = PackageSource(settings, keys)
+
+        async def scenario() -> None:
+            builder = BaseImageBuilder(settings, script=script, base_image=source.base_image)
+            builder.start()
+            await builder._task  # noqa: SLF001
+
+        asyncio.run(scenario())
+        log = (settings.images_dir / "build.log").read_text()
+        assert "name=hardened/debian/13/agent-base-arm64.qcow2" in log and "mode=600" in log
+        assert "tok" not in log.replace("token", "")  # the token is in the file, never in the output
+        assert not (settings.images_dir / ".artifactory-curl").exists()  # and the file is gone afterwards
+    finally:
+        fake.close()
+
+
+def test_a_base_image_that_cannot_be_verified_stops_the_build(tmp_path: Path) -> None:
+    from backend.keystore import KeyStore
+    from backend.net.packages import PackageSource
+    from tests.test_agents_api import FakeKeychain
+
+    fake, repository, _ = published_image(tmp_path)
+    fake.storage_api, fake.checksum_header = False, False
+    try:
+        settings = Settings(home=tmp_path / "home")
+        settings.ensure_layout()
+        settings.update_user_config(["packages", "artifactory"], repository.model_dump())
+        keys = KeyStore(run=FakeKeychain())
+        keys.set("ARTIFACTORY_TOKEN", "tok")
+        script = tmp_path / "build.sh"
+        script.write_text("#!/bin/bash\necho should-not-run\n")
+
+        async def scenario() -> Any:
+            builder = BaseImageBuilder(settings, script=script, base_image=PackageSource(settings, keys).base_image)
+            builder.start()
+            await builder._task  # noqa: SLF001
+            return builder.status()
+
+        status = asyncio.run(scenario())
+        assert status.detail.startswith("Build failed:") and "no SHA-256" in status.detail
+        assert "should-not-run" not in (settings.images_dir / "build.log").read_text()
+    finally:
+        fake.close()
+
+
+def test_the_base_image_path_is_checked() -> None:
+    for bad in ("../x.qcow2", "repo/x.iso", "/repo/x.qcow2", "repo/../x.qcow2", "x.qcow2"):
+        with pytest.raises(ValueError):
+            Artifactory(**{**REPO, "base_image": bad})
+    assert Artifactory(**{**REPO, "base_image": "images/debian/agent-arm64.raw"}).base_image

@@ -10,10 +10,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import threading
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 PROBE_WHEEL = "agent_office_probe-1.0-py3-none-any.whl"
@@ -39,6 +41,11 @@ class FakeArtifactory:
         tls: tuple[str, str] | None = None,
     ) -> None:
         self.requests: list[dict[str, Any]] = []
+        # A generic repository: published files by "repo/path", and how Artifactory describes them.
+        self.files: dict[str, Path] = {}
+        self.storage_api = True  # False: a remote repository that has not cached the file yet
+        self.checksum_header = True
+        self.recorded_sha256: dict[str, str] = {}  # overrides, to publish a wrong checksum
         expected = "Basic " + base64.b64encode(f"{username}:{token}".encode()).decode()
         wheel = probe_wheel()
         digest = hashlib.sha256(wheel).hexdigest()
@@ -58,11 +65,50 @@ class FakeArtifactory:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _file(self, head: bool) -> bool:
+                """Serve the generic repository and the storage API; False if the path is not theirs."""
+                storage = "/artifactory/api/storage/"
+                if self.path.startswith(storage):
+                    name = self.path[len(storage):]
+                    if name not in outer.files or not outer.storage_api:
+                        self._send(404)
+                        return True
+                    body = json.dumps({
+                        "size": str(outer.files[name].stat().st_size), "lastModified": "2026-10-01T10:00:00.000Z",
+                        "checksums": {"sha256": outer.sha256(name)}}).encode()
+                    self._send(200, body, "application/json")
+                    return True
+                name = self.path.removeprefix("/artifactory/")
+                if name not in outer.files:
+                    return False
+                path = outer.files[name]
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(path.stat().st_size))
+                if outer.checksum_header:
+                    self.send_header("X-Checksum-Sha256", outer.sha256(name))
+                self.end_headers()
+                if not head:
+                    with path.open("rb") as source:
+                        while chunk := source.read(1 << 20):
+                            self.wfile.write(chunk)
+                return True
+
+            def do_HEAD(self) -> None:
+                authorized = self.headers.get("Authorization") == expected
+                outer.requests.append({"path": self.path, "authorized": authorized, "method": "HEAD"})
+                if not authorized:
+                    return self._send(401)
+                if not self._file(head=True):
+                    self._send(404)
+
             def do_GET(self) -> None:
                 authorized = self.headers.get("Authorization") == expected
                 outer.requests.append({"path": self.path, "authorized": authorized})
                 if not authorized:
                     return self._send(401)
+                if self._file(head=False):
+                    return None
                 if not self.path.startswith(prefix + "/"):
                     return self._send(404)
                 rest = self.path[len(prefix):]
@@ -91,6 +137,19 @@ class FakeArtifactory:
             self._server.socket = context.wrap_socket(self._server.socket, server_side=True)
             self.scheme = "https"
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+    def publish(self, name: str, path: Path) -> None:
+        self.files[name] = path
+
+    def sha256(self, name: str) -> str:
+        if name in self.recorded_sha256:
+            return self.recorded_sha256[name]
+        digest = hashlib.sha256()
+        with self.files[name].open("rb") as source:
+            while chunk := source.read(1 << 20):
+                digest.update(chunk)
+        self.recorded_sha256.setdefault("_cache_" + name, digest.hexdigest())
+        return digest.hexdigest()
 
     def url(self, host: str = "127.0.0.1") -> str:
         return f"{self.scheme}://{host}:{self.port}/artifactory"

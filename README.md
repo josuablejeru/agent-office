@@ -262,6 +262,17 @@ Settings shows the internal domains currently in effect.
   image; an agent can read it on its own computer, so use a read-only token.
   In `config.yaml` the same settings (without the token) are under
   `packages.artifactory`.
+- **A company base image.** Where agents' computers must start from a
+  company-approved (hardened) image, put its path in Artifactory
+  (`repository/path/image.qcow2`) under Settings › Network › Package
+  repository › Base image. The next system image build downloads it with the
+  same Artifactory login, checks it against the SHA-256 Artifactory records for
+  it (and refuses it if there is none, or if it does not match), and installs
+  the desktop, Chrome and the agent software on top. The image must be built
+  for ARM64 (aarch64), be Debian-based with cloud-init (NoCloud), and be qcow2
+  or raw; an x86_64 image is stopped within seconds with that explanation.
+  Where every image came from is recorded in
+  `images/debian-desktop.source.json` and shown in Settings.
 - **Signing in is separate.** The agent's Chrome has none of your sessions or
   certificates. Use Take control to log in once; tools that require a
   company-managed device or a client certificate will refuse it.

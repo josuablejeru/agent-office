@@ -66,6 +66,7 @@ export interface PackageRepository {
   username: string;
   pypi_repo: string;
   npm_repo: string;
+  base_image: string;
   has_token: boolean;
 }
 
@@ -74,6 +75,7 @@ export interface PackageRepositoryUpdate {
   username: string;
   pypi_repo: string;
   npm_repo: string;
+  base_image: string;
   token: string;
 }
 
@@ -138,6 +140,7 @@ export interface BaseImageStatus {
   ready: boolean;
   building: boolean;
   detail: string;
+  source: string;
 }
 
 export interface Capabilities {

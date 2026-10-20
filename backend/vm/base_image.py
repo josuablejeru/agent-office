@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -28,6 +29,8 @@ class BaseImageStatus(BaseModel):
     building: bool
     # Last line the build printed, or the reason it failed.
     detail: str = ""
+    # Where the image agents boot from came from, for tracing it back.
+    source: str = ""
 
 
 class BaseImageBuilder:
@@ -37,11 +40,14 @@ class BaseImageBuilder:
         script: Path = BUILD_SCRIPT,
         certificates: Callable[[], Awaitable[str]] | None = None,
         pip_index_url: Callable[[], Awaitable[str]] | None = None,
+        base_image: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
         self._settings = settings
         self._script = script
         self._certificates = certificates
         self._pip_index_url = pip_index_url
+        # Returns (ImageInfo, curl credentials) for a company base image, or None.
+        self._base_image = base_image
         self._task: asyncio.Task[None] | None = None
         self._detail = ""
 
@@ -49,11 +55,26 @@ class BaseImageBuilder:
     def log_path(self) -> Path:
         return self._settings.images_dir / "build.log"
 
+    @property
+    def source_path(self) -> Path:
+        return self._settings.images_dir / f"{DEFAULT_IMAGE}.source.json"
+
+    def source(self) -> str:
+        """Where the current image was built from, in words."""
+        try:
+            record = json.loads(self.source_path.read_text())
+        except (OSError, ValueError):
+            return ""
+        built = f", built {record['built_at']}" if record.get("built_at") else ""
+        return f"{record.get('from', '?')} ({record.get('checksum', '')[:19]}…{built})"
+
     def status(self) -> BaseImageStatus:
+        ready = self._settings.base_image_path(DEFAULT_IMAGE).exists()
         return BaseImageStatus(
-            ready=self._settings.base_image_path(DEFAULT_IMAGE).exists(),
+            ready=ready,
             building=self._task is not None and not self._task.done(),
             detail=self._detail,
+            source=self.source() if ready else "",
         )
 
     def log_tail(self, lines: int = 80) -> list[str]:
@@ -162,6 +183,34 @@ class BaseImageBuilder:
         index = await self._pip_index_url() if self._pip_index_url else ""
         if index:
             env["PIP_INDEX_URL"] = index
+        # A company base image from Artifactory instead of Debian's public one.
+        credentials_file: Path | None = None
+        if self._base_image:
+            from backend.net.packages import ImageError
+
+            try:
+                chosen = await self._base_image()
+            except ImageError as exc:
+                self._detail = f"Build failed: {exc}"
+                self.log_path.write_text(f"error: {exc}\n")
+                return
+            if chosen:
+                image, credentials = chosen
+                credentials_file = self._settings.images_dir / ".artifactory-curl"
+                fd = os.open(credentials_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as handle:
+                    handle.write(credentials)
+                env.update({
+                    "BASE_IMAGE_URL": image.url, "BASE_IMAGE_SHA256": image.sha256,
+                    "BASE_IMAGE_NAME": image.path, "BASE_IMAGE_CURL_CONFIG": str(credentials_file),
+                })
+        try:
+            await self._run_build(env)
+        finally:
+            if credentials_file is not None:
+                credentials_file.unlink(missing_ok=True)
+
+    async def _run_build(self, env: dict[str, str]) -> None:
         with self.log_path.open("w") as build_log:
             process = await asyncio.create_subprocess_exec(
                 "/bin/bash", str(self._script),
@@ -182,5 +231,8 @@ class BaseImageBuilder:
                         self._detail = text[:200]
             code = await process.wait()
         if code != 0:
-            self._detail = f"Build failed: {self._detail}"
+            # The script's own explanation, rather than whatever printed last while it cleaned up.
+            errors = [line for line in self.log_tail(lines=400) if line.startswith("error: ")]
+            reason = errors[-1].removeprefix("error: ") if errors else self._detail
+            self._detail = f"Build failed: {reason}"
         log.info("base image build finished", extra={"exit_code": code})

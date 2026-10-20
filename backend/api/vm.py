@@ -208,6 +208,7 @@ class PackageRepository(BaseModel):
     username: str = ""
     pypi_repo: str = ""
     npm_repo: str = ""
+    base_image: str = ""
     has_token: bool = False
 
 
@@ -216,6 +217,7 @@ class PackageRepositoryUpdate(BaseModel):
     username: str
     pypi_repo: str
     npm_repo: str = ""
+    base_image: str = ""
     # Left empty to keep the token already stored.
     token: str = Field(default="", max_length=4096)
 
@@ -233,6 +235,7 @@ def _validated(payload: PackageRepositoryUpdate) -> packages.Artifactory:
         return packages.Artifactory(
             url=payload.url, username=payload.username.strip(),
             pypi_repo=payload.pypi_repo.strip(), npm_repo=payload.npm_repo.strip(),
+            base_image=payload.base_image.strip().strip("/"),
         )
     except ValueError as exc:
         first = exc.errors()[0] if hasattr(exc, "errors") else {}

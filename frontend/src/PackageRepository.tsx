@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import type { PackageRepositoryUpdate } from "./types";
 
-const EMPTY: PackageRepositoryUpdate = { url: "", username: "", pypi_repo: "", npm_repo: "", token: "" };
+const EMPTY: PackageRepositoryUpdate = {
+  url: "",
+  username: "",
+  pypi_repo: "",
+  npm_repo: "",
+  base_image: "",
+  token: "",
+};
 
 /** Settings for a company package repository (JFrog Artifactory), used by pip and npm on agents' computers. */
 export function PackageRepositorySettings() {
@@ -11,6 +18,7 @@ export function PackageRepositorySettings() {
   const [configured, setConfigured] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [imageSource, setImageSource] = useState("");
 
   useEffect(() => {
     void api
@@ -20,6 +28,10 @@ export function PackageRepositorySettings() {
         setHasToken(current.has_token);
         setConfigured(!!current.url);
       })
+      .catch(() => undefined);
+    void api
+      .baseImage()
+      .then((status) => setImageSource(status.source))
       .catch(() => undefined);
   }, []);
 
@@ -102,6 +114,25 @@ export function PackageRepositorySettings() {
           <input placeholder="e.g. npm-remote" value={form.npm_repo} onChange={(e) => set("npm_repo", e.target.value)} />
         </label>
       </div>
+      <label>
+        Base image for agents&apos; computers (optional)
+        <input
+          placeholder="repository/path/to/image-arm64.qcow2"
+          value={form.base_image}
+          onChange={(e) => set("base_image", e.target.value)}
+        />
+      </label>
+      <p className="hint">
+        For a company-approved (hardened) image: the next system image build starts from it instead of Debian&apos;s
+        public cloud image, and refuses it unless it matches the SHA-256 Artifactory records for it. It must be an
+        ARM64 (aarch64) Debian-based image with cloud-init, in qcow2 or raw format.
+        {imageSource && (
+          <>
+            {" "}
+            The current system image was built from <strong>{imageSource}</strong>.
+          </>
+        )}
+      </p>
       <div className="modal-actions">
         {configured && (
           <button type="button" className="danger" disabled={busy} onClick={() => void remove()}>

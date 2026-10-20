@@ -145,7 +145,7 @@ def test_base_image_status_and_ui_serving(settings: Settings, tmp_path: Path) ->
         assert test_client.get("/api/agents").status_code == 401  # the API still needs the token
         headers = {"Authorization": f"Bearer {app.state.api_token}"}
         status_body = test_client.get("/api/system/base-image", headers=headers).json()
-        assert status_body == {"ready": False, "building": False, "detail": ""}
+        assert status_body == {"ready": False, "building": False, "detail": "", "source": ""}
 
 
 def test_vm_start_without_base_image_reports_conflict(client: TestClient) -> None:

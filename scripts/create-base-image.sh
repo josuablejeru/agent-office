@@ -13,6 +13,11 @@
 #   EXTRA_CA_FILE=roots.pem   also trust these root certificates while
 #             downloading (a company network that inspects HTTPS); the app
 #             passes the roots this Mac trusts beyond the public ones
+#   BASE_IMAGE_URL, BASE_IMAGE_SHA256, BASE_IMAGE_CURL_CONFIG, BASE_IMAGE_NAME
+#             start from a company (hardened) image in Artifactory instead of
+#             Debian's public one: its address, the SHA-256 Artifactory records
+#             for it (required: it is refused otherwise), a curl config file
+#             with the credentials, and its name for the log
 #   PIP_INDEX_URL=https://user:token@host/artifactory/api/pypi/repo/simple
 #             fetch the agent software's Python packages from a company
 #             repository instead of the public index (set in the app's Settings)
@@ -104,23 +109,57 @@ BUILD_STARTED=$SECONDS
 phase_started=$SECONDS
 took() { echo "    took $((SECONDS - phase_started))s"; phase_started=$SECONDS; }
 
-echo "==> Downloading $CLOUD_IMAGE"
-expected="$(curl -fsSL "$MIRROR/SHA512SUMS" | awk -v f="$CLOUD_IMAGE" '$2 == f {print $1}')"
-[ -n "$expected" ] || die "no checksum published for $CLOUD_IMAGE"
-# A cached download from an earlier "latest" no longer matches: fetch it afresh once.
-for attempt in 1 2; do
-  curl -fL --retry 3 -C - -o "$CACHE_DIR/$CLOUD_IMAGE" "$MIRROR/$CLOUD_IMAGE"
-  actual="$(shasum -a 512 "$CACHE_DIR/$CLOUD_IMAGE" | awk '{print $1}')"
-  [ "$expected" = "$actual" ] && break
-  rm -f "$CACHE_DIR/$CLOUD_IMAGE"
-  [ "$attempt" = 2 ] && die "checksum mismatch for $CLOUD_IMAGE; the download was removed, run again"
-  echo "    the cached copy is out of date; downloading it again"
-done
+if [ -n "${BASE_IMAGE_URL:-}" ]; then
+  # A company base image: verified against the checksum Artifactory records,
+  # never used unverified, and never swapped for the public image.
+  [[ "${BASE_IMAGE_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || die "no SHA-256 for the base image; it is not used unverified"
+  echo "==> Downloading the company base image ${BASE_IMAGE_NAME:-} from $(printf '%s' "$BASE_IMAGE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')"
+  SOURCE_IMAGE="$CACHE_DIR/base-$BASE_IMAGE_SHA256"
+  if [ ! -f "$SOURCE_IMAGE" ]; then
+    # The credentials come from a file: on the command line they would show in `ps`.
+    curl -fL --retry 3 -K "$BASE_IMAGE_CURL_CONFIG" -o "$SOURCE_IMAGE.part" "$BASE_IMAGE_URL" \
+      || { rm -f "$SOURCE_IMAGE.part"; die "the base image could not be downloaded from Artifactory"; }
+    mv "$SOURCE_IMAGE.part" "$SOURCE_IMAGE"
+  fi
+  actual="$(shasum -a 256 "$SOURCE_IMAGE" | awk '{print $1}')"
+  if [ "$actual" != "$BASE_IMAGE_SHA256" ]; then
+    rm -f "$SOURCE_IMAGE"
+    die "the downloaded base image does not match the SHA-256 Artifactory records for it; it was deleted"
+  fi
+  SOURCE_DESCRIPTION="Artifactory: ${BASE_IMAGE_NAME:-$BASE_IMAGE_URL}"
+  SOURCE_CHECKSUM="sha256:$BASE_IMAGE_SHA256"
+else
+  echo "==> Downloading $CLOUD_IMAGE"
+  expected="$(curl -fsSL "$MIRROR/SHA512SUMS" | awk -v f="$CLOUD_IMAGE" '$2 == f {print $1}')"
+  [ -n "$expected" ] || die "no checksum published for $CLOUD_IMAGE"
+  # A cached download from an earlier "latest" no longer matches: fetch it afresh once.
+  for attempt in 1 2; do
+    curl -fL --retry 3 -C - -o "$CACHE_DIR/$CLOUD_IMAGE" "$MIRROR/$CLOUD_IMAGE"
+    actual="$(shasum -a 512 "$CACHE_DIR/$CLOUD_IMAGE" | awk '{print $1}')"
+    [ "$expected" = "$actual" ] && break
+    rm -f "$CACHE_DIR/$CLOUD_IMAGE"
+    [ "$attempt" = 2 ] && die "checksum mismatch for $CLOUD_IMAGE; the download was removed, run again"
+    echo "    the cached copy is out of date; downloading it again"
+  done
+  SOURCE_IMAGE="$CACHE_DIR/$CLOUD_IMAGE"
+  SOURCE_DESCRIPTION="Debian $DEBIAN_VERSION cloud image ($MIRROR/$CLOUD_IMAGE)"
+  SOURCE_CHECKSUM="sha512:$expected"
+fi
 
 took
 echo "==> Preparing ${DISK_SIZE} disk"
-qemu-img convert -O qcow2 "$CACHE_DIR/$CLOUD_IMAGE" "$WORK_DIR/disk.qcow2"
-qemu-img resize "$WORK_DIR/disk.qcow2" "$DISK_SIZE" >/dev/null
+# Only a plain disk image is accepted: qcow2 or raw, standing on its own.
+info="$(qemu-img info "$SOURCE_IMAGE")" || die "the base image is not a disk image QEMU can read"
+format="$(printf '%s\n' "$info" | sed -n 's/^file format: //p' | head -1)"
+case "$format" in qcow2|raw) ;; *) die "the base image is a '${format:-unknown}' file; qcow2 or raw is needed" ;; esac
+printf '%s\n' "$info" | grep -q '^backing file:' && die "the base image depends on another image (it has a backing file)"
+qemu-img convert -f "$format" -O qcow2 "$SOURCE_IMAGE" "$WORK_DIR/disk.qcow2"
+# Grown to the working size, never shrunk: a company image may already be larger.
+current_size="$(qemu-img info "$WORK_DIR/disk.qcow2" | sed -nE 's/^virtual size: .*\(([0-9]+) bytes\).*/\1/p' | head -1)"
+wanted_size="$(( ${DISK_SIZE%G} * 1024 * 1024 * 1024 ))"
+if [ "$current_size" -lt "$wanted_size" ]; then
+  qemu-img resize "$WORK_DIR/disk.qcow2" "$DISK_SIZE" >/dev/null
+fi
 
 password="$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 16 || true)"
 mkdir "$WORK_DIR/seed"
@@ -322,8 +361,20 @@ show_progress() {
   shown=$size
 }
 
+# An image that cannot work is told apart from a slow one within minutes.
+fail_early() {
+  cp "$WORK_DIR/console.log" "$IMAGES_DIR/$IMAGE_NAME.build-failed.log" 2>/dev/null || true
+  die "$1; see $IMAGES_DIR/$IMAGE_NAME.build-failed.log"
+}
+CLOUD_INIT_DEADLINE_SECONDS="${CLOUD_INIT_DEADLINE_SECONDS:-300}"
 waited=0
 while kill -0 "$qemu_pid" 2>/dev/null; do
+  if LC_ALL=C grep -a -q -E 'Failed to load Boot|No bootable option|Shell> ' "$WORK_DIR/console.log" 2>/dev/null; then
+    fail_early "the base image does not start: the Mac's firmware found no ARM64 boot loader on it. It must be built for ARM64 (aarch64), not x86_64"
+  fi
+  if [ "$waited" -ge "$CLOUD_INIT_DEADLINE_SECONDS" ] && ! LC_ALL=C grep -a -q 'Cloud-init v\.' "$WORK_DIR/console.log" 2>/dev/null; then
+    fail_early "the base image started but cloud-init did not run within $CLOUD_INIT_DEADLINE_SECONDS seconds: it needs cloud-init with the NoCloud data source (a seed disk labelled cidata)"
+  fi
   if [ "$waited" -ge "$BUILD_TIMEOUT_SECONDS" ]; then
     cp "$WORK_DIR/console.log" "$IMAGES_DIR/$IMAGE_NAME.build-failed.log" 2>/dev/null || true
     die "provisioning timed out; see $IMAGES_DIR/$IMAGE_NAME.build-failed.log"
@@ -349,6 +400,10 @@ took
 rm -f "$BASE_IMAGE"
 mv "$WORK_DIR/disk.qcow2" "$BASE_IMAGE"
 chmod 444 "$BASE_IMAGE"
+# Where it came from, so every agent's computer can be traced to its base image.
+printf '{"from": "%s", "checksum": "%s", "built_at": "%s"}\n' \
+  "$(printf '%s' "$SOURCE_DESCRIPTION" | sed 's/["\\]/\\&/g')" "$SOURCE_CHECKSUM" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  >"$IMAGES_DIR/$IMAGE_NAME.source.json"
 rm -f "$PASSWORD_FILE"
 (umask 077 && printf '%s\n' "$password" >"$PASSWORD_FILE")
 

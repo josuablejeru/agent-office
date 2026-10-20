@@ -127,7 +127,10 @@ def create_app(
     package_source = PackageSource(settings, key_store)
     app.state.vm_manager.packages = package_source.guest_settings
     app.state.base_image_builder = BaseImageBuilder(
-        settings, certificates=app.state.certificates.bundle, pip_index_url=package_source.pip_index_url
+        settings,
+        certificates=app.state.certificates.bundle,
+        pip_index_url=package_source.pip_index_url,
+        base_image=package_source.base_image,
     )
     app.state.approvals = ApprovalBroker()
     app.state.channels = ChannelService(engine)
