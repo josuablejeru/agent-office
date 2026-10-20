@@ -222,7 +222,7 @@ def test_a_certificate_can_be_added_and_removed_in_settings(tmp_path: Path) -> N
 
         refused = client.post("/api/system/certificates", content=pem(leaf).encode())
         assert refused.status_code == 400 and "certificate authority" in refused.json()["detail"]
-        assert client.post("/api/system/certificates", content=b"x" * 300_000).status_code == 413
+        assert client.post("/api/system/certificates", content=b"x" * 11_000_000).status_code == 413
 
         # A .cer file is often DER rather than PEM: both are accepted.
         (added,) = client.post("/api/system/certificates", content=root.public_bytes(Enc.DER)).json()
@@ -241,3 +241,20 @@ def test_an_old_root_without_extensions_is_still_a_root() -> None:
     old_root = make_v1_root("Example Corp Legacy Root")
     found = certificate_authorities(pem(old_root).encode())
     assert [c.subject.rfc4514_string() for c in found] == ["CN=Example Corp Legacy Root"]
+
+
+def test_a_company_bundle_of_hundreds_of_certificates_is_accepted(tmp_path: Path) -> None:
+    from cryptography.hazmat.primitives.serialization import pkcs7 as p7
+
+    from backend.net.certificates import read_any
+
+    roots = [make_ca(f"Example Corp CA {n}")[0] for n in range(700)]
+    leaf, _ = make_ca("server.example.com", ca=False)
+    bundle = ("".join(pem(root) for root in roots) + pem(leaf)).encode()
+    assert len(bundle) > 256 * 1024  # bigger than the old limit, like the file that was refused
+    assert len(read_any(bundle)) == 700  # the server certificate is left out
+
+    for encoding in (Encoding.PEM, Encoding.DER):  # PKCS#7, as IT sometimes ships it under .crt
+        packed = p7.serialize_certificates(roots[:3], encoding)
+        assert [c.subject for c in read_any(packed)] == [r.subject for r in roots[:3]]
+    assert read_any(b"\x30\x82garbage") == []

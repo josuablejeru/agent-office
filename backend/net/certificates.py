@@ -24,7 +24,7 @@ from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from pydantic import BaseModel
 
 from backend.logging_config import get_logger
@@ -88,14 +88,29 @@ def describe(certificate: x509.Certificate, source: str) -> TrustedRoot:
 
 
 def read_any(data: bytes) -> list[x509.Certificate]:
-    """The CA certificates in an uploaded file, whether PEM text or a single DER certificate."""
-    if b"-----BEGIN CERTIFICATE-----" in data:
+    """The CA certificates in an uploaded file.
+
+    Companies hand these out in several forms, often all named `.crt`: PEM text
+    with one or many certificates, a single binary (DER) certificate, or a
+    PKCS#7 bundle (PEM or binary).
+    """
+    certificates: list[x509.Certificate] = []
+    if b"-----BEGIN PKCS7-----" in data:
+        try:
+            certificates = pkcs7.load_pem_pkcs7_certificates(data)
+        except ValueError:
+            return []
+    elif b"-----BEGIN CERTIFICATE-----" in data:
         return certificate_authorities(data)
-    try:
-        certificate = x509.load_der_x509_certificate(data)
-    except ValueError:
-        return []
-    return certificate_authorities(certificate.public_bytes(Encoding.PEM))
+    else:
+        try:
+            certificates = [x509.load_der_x509_certificate(data)]
+        except ValueError:
+            try:
+                certificates = pkcs7.load_der_pkcs7_certificates(data)
+            except ValueError:
+                return []
+    return certificate_authorities(b"".join(c.public_bytes(Encoding.PEM) for c in certificates))
 
 
 async def trusted_by_macos(pem: str) -> bool:

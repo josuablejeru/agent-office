@@ -199,7 +199,8 @@ async def dns_status(request: Request) -> DnsStatus:
     )
 
 
-MAX_CERTIFICATE_BYTES = 256 * 1024
+# Company bundles can hold hundreds of certificates.
+MAX_CERTIFICATE_BYTES = 10 * 1024 * 1024
 
 
 @router.post("/system/certificates")
@@ -207,7 +208,7 @@ async def add_certificate(request: Request) -> list[dict[str, str]]:
     """Trust a root certificate on agents' computers (from their next start). The body is the file."""
     data = await request.body()
     if len(data) > MAX_CERTIFICATE_BYTES:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "That file is too large for a certificate.")
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "That file is too large for a certificate bundle (over 10 MB).")
     try:
         added = request.app.state.certificates.add(data)
     except ValueError as exc:
