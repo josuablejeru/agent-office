@@ -113,6 +113,27 @@ class GoogleTokenSource:
             return await asyncio.to_thread(self._refresh)
 
 
+def vertex_model_id(model: str) -> str:
+    """The model as Vertex's OpenAI-compatible endpoint names it: publisher/model.
+
+    Gemini models are often written without the publisher; Claude models do not
+    work through this endpoint at all, and Google's own error does not say so.
+    """
+    model = model.strip()
+    if "/" in model:
+        return model
+    if model.startswith("claude"):
+        raise ProviderError(
+            f"'{model}' is a Claude model: on Vertex AI, Claude models go through the "
+            "vertex-claude provider. Choose that provider for this model."
+        )
+    if model.startswith(("gemini", "gemma")):
+        return f"google/{model}"
+    raise ProviderError(
+        f"Vertex AI needs the model as publisher/model, for example google/gemini-2.5-pro (not '{model}')."
+    )
+
+
 class VertexProvider(OpenAICompatibleProvider):
     """Gemini (and other Vertex-hosted models) via Vertex's OpenAI-compatible endpoint."""
 
@@ -124,7 +145,7 @@ class VertexProvider(OpenAICompatibleProvider):
         token_source: TokenSource | None = None,
         **options: Any,
     ) -> None:
-        super().__init__(openai_base_url(project, region), model, **options)
+        super().__init__(openai_base_url(project, region), vertex_model_id(model), **options)
         self._token_source = token_source or GoogleTokenSource()
 
     async def _auth_headers(self) -> dict[str, str]:

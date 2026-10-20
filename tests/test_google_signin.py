@@ -105,3 +105,14 @@ def test_a_vertex_quota_error_passes_on_what_google_said() -> None:
         asyncio.run(provider.chat([ChatMessage(role="user", content="hi")]))
     text = str(raised.value)
     assert "online_prediction_requests_per_base_model" in text and "region" in text
+
+
+def test_model_names_for_the_vertex_provider_are_checked_and_completed() -> None:
+    from backend.providers.base import ProviderError
+
+    assert vertex.vertex_model_id("gemini-2.5-pro") == "google/gemini-2.5-pro"
+    assert vertex.vertex_model_id("meta/llama-4") == "meta/llama-4"
+    with pytest.raises(ProviderError, match="vertex-claude provider"):
+        vertex.vertex_model_id("claude-opus-5-5")
+    with pytest.raises(ProviderError, match="publisher/model"):
+        vertex.vertex_model_id("mystery-model")
