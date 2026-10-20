@@ -88,13 +88,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM INT
 
-EXTRA_CA_B64=""
+EXTRA_CA=false
 if [ -n "${EXTRA_CA_FILE:-}" ] && [ -s "$EXTRA_CA_FILE" ]; then
+  EXTRA_CA=true
   echo "==> Also trusting the root certificates in $EXTRA_CA_FILE"
   # Downloads on the Mac: the public roots plus the extra ones.
   cat /etc/ssl/cert.pem "$EXTRA_CA_FILE" >"$WORK_DIR/ca-bundle.pem"
   export CURL_CA_BUNDLE="$WORK_DIR/ca-bundle.pem"
-  EXTRA_CA_B64="$(base64 <"$EXTRA_CA_FILE" | tr -d '\n')"
 fi
 
 echo "==> Downloading $CLOUD_IMAGE"
@@ -116,6 +116,17 @@ qemu-img resize "$WORK_DIR/disk.qcow2" "$DISK_SIZE" >/dev/null
 
 password="$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 16 || true)"
 mkdir "$WORK_DIR/seed"
+if $EXTRA_CA; then
+  # One file per certificate on the seed disk. (A company bundle can hold
+  # hundreds; passed on a command line it would exceed Linux's argument limit.)
+  mkdir "$WORK_DIR/seed/certs"
+  awk -v dir="$WORK_DIR/seed/certs" '
+    /-----BEGIN CERTIFICATE-----/ { n++; file = sprintf("%s/ca%04d.crt", dir, n) }
+    n && file { print > file }
+    /-----END CERTIFICATE-----/ { close(file); file = "" }
+  ' "$EXTRA_CA_FILE"
+  echo "    $(ls "$WORK_DIR/seed/certs" | wc -l | tr -d ' ') certificates"
+fi
 cat >"$WORK_DIR/seed/meta-data" <<EOF
 instance-id: agent-office-base-build
 local-hostname: $IMAGE_NAME
@@ -135,10 +146,11 @@ chpasswd:
     - name: $GUEST_USER
       password: $password
       type: text
-$(if [ -n "$EXTRA_CA_B64" ]; then cat <<CA
-# Trusted before anything is downloaded inside the VM (bootcmd runs first).
+$(if $EXTRA_CA; then cat <<'CA'
+# Trusted before anything is downloaded inside the VM (bootcmd runs first):
+# copied from the seed disk, where the build put one file per certificate.
 bootcmd:
-  - [sh, -c, "mkdir -p /usr/local/share/ca-certificates/agent-office && echo $EXTRA_CA_B64 | base64 -d > /usr/local/share/ca-certificates/agent-office/build.crt && update-ca-certificates"]
+  - [sh, -c, "mkdir -p /run/agent-office-ca /usr/local/share/ca-certificates/agent-office && mount -o ro -L cidata /run/agent-office-ca && cp /run/agent-office-ca/certs/*.crt /usr/local/share/ca-certificates/agent-office/ ; umount /run/agent-office-ca ; update-ca-certificates"]
 CA
 fi)
 package_update: true

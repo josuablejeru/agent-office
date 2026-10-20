@@ -27,6 +27,12 @@ PIP_CONF = Path("/etc/pip.conf")
 ENVIRONMENT = Path("/etc/environment")
 MARKER = "# agent-office: trust the host's extra root certificates"
 ENV_VARIABLES = ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS")
+# Run as root: writes the certificates given as a JSON list on stdin, one file each.
+WRITE_FILES = (
+    "import json, os, sys; d = sys.argv[1]; os.makedirs(d, exist_ok=True)\n"
+    "for n, pem in enumerate(json.load(sys.stdin), 1):\n"
+    "    open(os.path.join(d, 'host-%04d.crt' % n), 'w').write(pem)"
+)
 PEM = re.compile(r"-----BEGIN CERTIFICATE-----\s*([A-Za-z0-9+/=\s]+?)\s*-----END CERTIFICATE-----")
 
 
@@ -79,9 +85,8 @@ def configure_certificates() -> None:
         return
     ok = sudo("rm", "-rf", str(STORE_DIR))
     if wanted:
-        ok = ok and sudo("mkdir", "-p", str(STORE_DIR))
-        for number, pem in enumerate(wanted, 1):
-            ok = ok and sudo("tee", str(STORE_DIR / f"host-{number:02d}.crt"), stdin=pem)
+        # One privileged step for all of them: a company bundle can hold hundreds.
+        ok = ok and sudo("python3", "-c", WRITE_FILES, str(STORE_DIR), stdin=json.dumps(wanted))
     ok = ok and sudo("update-ca-certificates", "--fresh")
     if wanted:
         ok = ok and sudo("mkdir", "-p", str(CHROME_POLICY.parent))

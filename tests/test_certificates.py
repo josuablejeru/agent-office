@@ -106,7 +106,8 @@ def test_roots_from_the_host_are_installed_everywhere(guest_files: tuple[FakeSud
     commands = [" ".join(call[:2]) for call in sudo.calls]
     assert "update-ca-certificates --fresh" in commands
     targets = [call[1] for call in sudo.calls if call[0] == "tee"]
-    assert str(home / "store" / "host-01.crt") in targets and str(guest_certificates.CHROME_POLICY) in targets
+    assert ("python3", "-c", guest_certificates.WRITE_FILES, str(home / "store")) in sudo.calls
+    assert str(guest_certificates.CHROME_POLICY) in targets
     assert str(home / "pip.conf") in targets and str(home / "environment") in targets
 
 
@@ -259,3 +260,14 @@ def test_a_company_bundle_of_hundreds_of_certificates_is_accepted(tmp_path: Path
         # A PKCS#7 set has no fixed order: which OpenSSL wrote it decides.
         assert {c.subject for c in read_any(packed)} == {r.subject for r in roots[:3]}
     assert read_any(b"\x30\x82garbage") == []
+
+
+def test_the_root_side_script_writes_one_file_per_certificate(tmp_path: Path) -> None:
+    import sys
+
+    roots = [pem(make_ca(f"Example Corp CA {n}")[0]) for n in range(3)]
+    subprocess.run([sys.executable, "-c", guest_certificates.WRITE_FILES, str(tmp_path / "store")],
+                   input=json.dumps(roots), text=True, check=True)
+    files = sorted((tmp_path / "store").iterdir())
+    assert [f.name for f in files] == ["host-0001.crt", "host-0002.crt", "host-0003.crt"]
+    assert [f.read_text() for f in files] == roots
