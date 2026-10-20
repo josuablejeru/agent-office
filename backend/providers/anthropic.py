@@ -131,7 +131,17 @@ class AnthropicProvider(ModelProvider):
         except anthropic.NotFoundError as exc:
             raise ProviderError(f"The model '{self._model}' was not found.") from exc
         except anthropic.RateLimitError as exc:
-            raise ProviderError("Rate limit reached; try again shortly.") from exc
+            # On Vertex this is usually a quota of zero for this model in this region,
+            # not too many requests: pass on what the API says.
+            said = " ".join(str(getattr(exc, "message", "") or exc).split())[:400]
+            hint = ""
+            if self._label == "vertex":
+                hint = (
+                    " On Vertex AI this usually means the project has no quota for this model in this "
+                    "region: try the region Claude Code uses (CLOUD_ML_REGION), or request quota in the "
+                    "Google Cloud console (IAM & Admin › Quotas)."
+                )
+            raise ProviderError(f"Rate limit or quota reached: {said}.{hint}") from exc
         except anthropic.APIStatusError as exc:
             raise ProviderError(f"The API returned HTTP {exc.status_code}: {exc.message}") from exc
         except anthropic.APIConnectionError as exc:

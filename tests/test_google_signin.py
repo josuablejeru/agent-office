@@ -79,3 +79,29 @@ def test_each_kind_of_failure_says_what_to_do() -> None:
     assert "could not be reached" in unreachable and "proxy or certificate" in unreachable
     missing = vertex.describe_google_error(exceptions.DefaultCredentialsError("not found"))
     assert "No usable Google Cloud credentials" in missing
+
+
+def test_a_vertex_quota_error_passes_on_what_google_said() -> None:
+    import asyncio
+
+    import anthropic
+    import httpx2 as httpx  # the HTTP library this Anthropic SDK is built on
+
+    from backend.providers.anthropic import AnthropicProvider
+    from backend.providers.base import ProviderError
+
+    google_said = ("Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model "
+                   "with base model: anthropic-claude. Please submit a quota increase request.")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": {"code": 429, "message": google_said, "status": "RESOURCE_EXHAUSTED"}})
+
+    client = anthropic.AsyncAnthropic(api_key="x", base_url="http://vertex.test", max_retries=0,
+                                      http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    provider = AnthropicProvider("claude-model", client=client, label="vertex")
+    from backend.providers.base import ChatMessage
+
+    with pytest.raises(ProviderError) as raised:
+        asyncio.run(provider.chat([ChatMessage(role="user", content="hi")]))
+    text = str(raised.value)
+    assert "online_prediction_requests_per_base_model" in text and "region" in text
