@@ -10,12 +10,14 @@ import anthropic
 
 from backend.logging_config import get_logger
 from backend.providers.base import (
+    OMITTED_IMAGE_NOTE,
     ChatMessage,
     ModelProvider,
     ModelResponse,
     ProviderError,
     ToolCallRequest,
     ToolSpec,
+    images_to_send,
 )
 
 log = get_logger("providers")
@@ -45,11 +47,20 @@ def _assistant_content(message: ChatMessage) -> Any:
     return blocks or message.content
 
 
-def _tool_result(message: ChatMessage) -> dict[str, Any]:
+def _tool_result(message: ChatMessage, with_images: bool = True) -> dict[str, Any]:
+    content: Any = message.content
+    if message.images:
+        if with_images:
+            content = [{"type": "text", "text": message.content}] + [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image}}
+                for image in message.images
+            ]
+        else:
+            content = f"{message.content}\n{OMITTED_IMAGE_NOTE}"
     block: dict[str, Any] = {
         "type": "tool_result",
         "tool_use_id": message.tool_call_id,
-        "content": message.content,
+        "content": content,
     }
     try:
         if "error" in json.loads(message.content):
@@ -63,16 +74,18 @@ def to_request(messages: list[ChatMessage]) -> tuple[str, list[dict[str, Any]]]:
     """Split neutral messages into Anthropic's system prompt and message list."""
     system = "\n\n".join(m.content for m in messages if m.role == "system")
     wire: list[dict[str, Any]] = []
-    for message in messages:
+    sent_images = images_to_send(messages)
+    for index, message in enumerate(messages):
         if message.role == "system":
             continue
         if message.role == "tool":
             # All results for one assistant turn go back in a single user message.
+            result = _tool_result(message, with_images=index in sent_images)
             previous = wire[-1] if wire else None
             if previous and previous["role"] == "user" and isinstance(previous["content"], list):
-                previous["content"].append(_tool_result(message))
+                previous["content"].append(result)
             else:
-                wire.append({"role": "user", "content": [_tool_result(message)]})
+                wire.append({"role": "user", "content": [result]})
         elif message.role == "assistant":
             wire.append({"role": "assistant", "content": _assistant_content(message)})
         else:

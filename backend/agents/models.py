@@ -33,6 +33,7 @@ class AgentCreate(BaseModel):
     # Any group left out is allowed (or follows the switches above).
     permissions: dict[Group, Level] | None = None
     unknown_action: UnknownAction = "default"
+    vision_enabled: bool = False
     vm_image: str = Field(default="debian-desktop", pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     vm_memory_mb: int = Field(default=4096, ge=512, le=65536)
     vm_cpus: int = Field(default=4, ge=1, le=32)
@@ -53,6 +54,7 @@ class AgentUpdate(BaseModel):
     perm_files: bool | None = None
     permissions: dict[Group, Level] | None = None
     unknown_action: UnknownAction | None = None
+    vision_enabled: bool | None = None
     vm_memory_mb: int | None = Field(default=None, ge=512, le=65536)
     vm_cpus: int | None = Field(default=None, ge=1, le=32)
 
@@ -75,6 +77,7 @@ class AgentRead(BaseModel):
     # Every group with its level.
     permissions: dict[str, str] = {}
     unknown_action: str = "default"
+    vision_enabled: bool = False
     vm_image: str
     vm_memory_mb: int
     vm_cpus: int

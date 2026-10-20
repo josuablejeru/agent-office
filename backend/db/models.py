@@ -32,6 +32,8 @@ class Agent(SQLModel, table=True):
     permissions_json: str = ""
     # Actions no safety rule covers: "default" (the app's setting), "allow" or "ask".
     unknown_action: str = "default"
+    # The model is shown screenshots of the browser (and may click by position).
+    vision_enabled: bool = False
     vm_image: str = "debian-desktop"
     vm_memory_mb: int = 4096
     vm_cpus: int = 4

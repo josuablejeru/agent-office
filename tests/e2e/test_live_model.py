@@ -91,3 +91,56 @@ def test_remembers_what_it_was_told(office: Office, worker: int) -> None:
     office.api("DELETE", f"/api/agents/{worker}/messages")
     run = ask(office, worker, "Who should I ask for the guest wifi password? Answer in one sentence.")
     assert "Mirela" in run["reply"], run["reply"]
+
+
+def test_finds_and_clicks_something_only_visible_on_screen(office: Office) -> None:
+    """A red square drawn on a canvas, with no text or element: only a model that sees can find it."""
+    import random
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from tests.e2e.conftest import free_port
+
+    left, top = random.randint(200, 900), random.randint(150, 450)
+    page = f"""<!doctype html><title>Find it</title><body style="margin:0">
+<canvas id="c" width="1200" height="620"></canvas>
+<script>
+  const c = document.getElementById('c'), g = c.getContext('2d');
+  g.fillStyle = '#d00'; g.fillRect({left}, {top}, 60, 60);
+  c.addEventListener('click', (e) => fetch('/hit?x=' + e.offsetX + '&y=' + e.offsetY));
+</script>""".encode()
+    hits: list[tuple[int, int]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path.startswith("/hit"):
+                query = dict(part.split("=") for part in self.path.split("?", 1)[1].split("&"))
+                hits.append((int(float(query["x"])), int(float(query["y"]))))
+            body = page if self.path == "/" else b"ok"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    port = free_port()
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        provider, _, model = (os.environ.get("AGENT_OFFICE_E2E_VISION_MODEL") or LIVE_MODEL).partition("/")
+        response = office.api("POST", "/api/agents", json={
+            "name": "looker", "provider": provider, "model": model, "vision_enabled": True,
+            "vm_memory_mb": 3072, "vm_cpus": 2, "system_prompt": "You are a careful assistant. Use your tools."})
+        assert response.status_code == 201, response.text
+        looker = response.json()["id"]
+        office.turn_on(looker)
+        run = ask(office, looker, f"Open http://10.0.2.2:{port}/ and click the red square on the page. "
+                                  "Then tell me where it was.")
+        assert run["status"] == "completed", run["error"]
+        assert "browser.click_at" in tools_used(run)
+        assert any(left <= x <= left + 60 and top <= y <= top + 60 for x, y in hits), (hits, (left, top))
+    finally:
+        server.shutdown()

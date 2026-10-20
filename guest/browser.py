@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import os
 import shutil
 import urllib.request
@@ -95,6 +96,33 @@ SNAPSHOT_SCRIPT = """
     elements,
     total_elements: onScreen.length + elsewhere.length,
   };
+}
+"""
+
+# Draws each numbered element's number on the page, for a screenshot the model
+# reads: the numbers match the element list, so it can act by number on what it
+# sees. Called with false to remove them again.
+MARKS_SCRIPT = """
+(on) => {
+  document.querySelectorAll('[data-gl-mark]').forEach((el) => el.remove());
+  if (!on) return 0;
+  const layer = document.createElement('div');
+  layer.setAttribute('data-gl-mark', '');
+  layer.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
+  let count = 0;
+  for (const el of document.querySelectorAll('[data-gl-ref]')) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
+    const badge = document.createElement('div');
+    badge.textContent = el.getAttribute('data-gl-ref');
+    badge.style.cssText = 'position:fixed;left:' + Math.max(0, r.left) + 'px;top:' + Math.max(0, r.top) +
+      'px;background:#e11d48;color:#fff;font:bold 11px/13px sans-serif;padding:0 3px;' +
+      'border-radius:3px;opacity:0.9;pointer-events:none';
+    layer.appendChild(badge);
+    count++;
+  }
+  (document.body || document.documentElement).appendChild(layer);
+  return count;
 }
 """
 
@@ -388,22 +416,24 @@ class Browser:
 
     async def click(self, args: dict[str, Any]) -> dict[str, Any]:
         async def action(page: Any) -> dict[str, Any]:
-            context = page.context
-            known = len(context.pages)
+            known = len(page.context.pages)
 
             async def click() -> None:
                 await (await self._target(page, args)).click()
                 await self._settle(page)
 
-            result = await self._act(page, click)
-            if "error" not in result and len(context.pages) > known:
-                # The click opened a new tab: follow it.
-                self._page = page = context.pages[-1]
-                page.set_default_timeout(ACTION_TIMEOUT_MS)
-                result = await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)
-            return result
+            return await self._follow_new_tab(page, known, await self._act(page, click))
 
         return await self._run(action)
+
+    async def _follow_new_tab(self, page: Any, known: int, result: dict[str, Any]) -> dict[str, Any]:
+        """If an action opened a new tab, continue in it."""
+        context = page.context
+        if "error" not in result and len(context.pages) > known:
+            self._page = page = context.pages[-1]
+            page.set_default_timeout(ACTION_TIMEOUT_MS)
+            result = await self._snapshot(page, BRIEF_TEXT_CHARS, BRIEF_ELEMENTS)
+        return result
 
     async def type(self, args: dict[str, Any]) -> dict[str, Any]:
         text = args.get("text")
@@ -485,19 +515,78 @@ class Browser:
         return await self._run(lambda page: self._snapshot(page, FULL_TEXT_CHARS, FULL_ELEMENTS, offset))
 
     async def screenshot(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The visible part of the page as a JPEG.
+
+        One image pixel is one page pixel (`scale="css"`), so a position read off
+        the image is the position `click_at` clicks. With `marks`, the numbers of
+        the elements from the last page snapshot are drawn on it.
+        """
+        marks = optional_bool(args, "marks", False)
+
         async def action(page: Any) -> dict[str, Any]:
-            image = await page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY)
-            size = page.viewport_size or await page.evaluate(
-                "() => ({ width: innerWidth, height: innerHeight })"
-            )
+            size = await page.evaluate("() => ({ width: innerWidth, height: innerHeight })")
+            marked = 0
+            try:
+                if marks:
+                    marked = await page.evaluate(MARKS_SCRIPT, True)
+                image = await page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, scale="css")
+            finally:
+                if marks:
+                    with contextlib.suppress(Exception):
+                        await page.evaluate(MARKS_SCRIPT, False)
             return {
                 "url": page.url[:MAX_SHOWN_URL_CHARS],
                 "title": (await page.title())[:MAX_TITLE_CHARS],
                 "width": size["width"],
                 "height": size["height"],
+                "marked_elements": marked,
                 "image_format": "jpeg",
                 "image_base64": base64.b64encode(image).decode(),
             }
+
+        return await self._run(action)
+
+    async def click_at(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Click a position on the page, read off a screenshot: for canvases, icons and frames."""
+        x = optional_number(args, "x", -1, -1, 100_000)
+        y = optional_number(args, "y", -1, -1, 100_000)
+        button = args.get("button", "left")
+        if button not in ("left", "right", "middle"):
+            raise OperationError("'button' must be left, right or middle")
+        double = optional_bool(args, "double", False)
+
+        async def action(page: Any) -> dict[str, Any]:
+            size = await page.evaluate("() => ({ width: innerWidth, height: innerHeight })")
+            if not (0 <= x < size["width"] and 0 <= y < size["height"]):
+                raise OperationError(
+                    f"({x:.0f}, {y:.0f}) is outside the visible page, which is {size['width']} by "
+                    f"{size['height']} pixels: give a position from the latest screenshot"
+                )
+            known = len(page.context.pages)
+
+            async def click() -> None:
+                await page.mouse.click(x, y, button=button, click_count=2 if double else 1)
+                await self._settle(page)
+
+            return await self._follow_new_tab(page, known, await self._act(page, click))
+
+        return await self._run(action)
+
+    async def type_text(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Type with the keyboard into whatever has focus (after click_at), as a person would."""
+        text = args.get("text")
+        if not isinstance(text, str) or not text or len(text) > MAX_TYPE_LENGTH:
+            raise OperationError(f"'text' must be a string of 1 to {MAX_TYPE_LENGTH} characters")
+        submit = optional_bool(args, "submit", False)
+
+        async def action(page: Any) -> dict[str, Any]:
+            async def typing() -> None:
+                await page.keyboard.type(text, delay=5)
+                if submit:
+                    await page.keyboard.press("Enter")
+                await self._settle(page)
+
+            return await self._act(page, typing)
 
         return await self._run(action)
 

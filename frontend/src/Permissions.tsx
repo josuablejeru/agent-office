@@ -15,10 +15,21 @@ interface Props {
   onLevel: (group: string, level: Level) => void;
   onUnknownAction: (value: UnknownAction) => void;
   onJev: (enabled: boolean) => void;
+  visionEnabled: boolean;
+  onVision: (enabled: boolean) => void;
 }
 
 /** What one agent may do: a level per kind of tool, on top of the built-in safety rules. */
-export function Permissions({ levels, unknownAction, jevEnabled, onLevel, onUnknownAction, onJev }: Props) {
+export function Permissions({
+  levels,
+  unknownAction,
+  jevEnabled,
+  onLevel,
+  onUnknownAction,
+  onJev,
+  visionEnabled,
+  onVision,
+}: Props) {
   const [info, setInfo] = useState<PermissionsInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +94,24 @@ export function Permissions({ levels, unknownAction, jevEnabled, onLevel, onUnkn
           <option value="allow">Allowed</option>
           <option value="ask">Ask me first</option>
         </select>
+      </div>
+
+      <div className="vision-setting">
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={visionEnabled}
+            disabled={levels.browser === "off"}
+            onChange={(e) => onVision(e.target.checked)}
+          />
+          Let the model see the screen
+        </label>
+        <p className="hint">
+          After each browser action the model also gets a screenshot, with element numbers drawn on it, and can
+          click by position: for charts, maps, drawings, icon buttons and embedded pages. Everything visible on
+          those screenshots goes to the model provider, and each step takes longer and costs more. Needs a model
+          that reads images (Claude, Gemini, GPT-4o and similar).
+        </p>
       </div>
 
       <label className="toggle">

@@ -18,7 +18,7 @@ from backend.agents.channels import (
     mentions,
 )
 from backend.agents.loop import LoopResult, Outcome, RunLimits, StopReason, run_agent_loop
-from backend.agents.tools import ENVIRONMENT_NOTE, GuestToolExecutor, HostHandler, tools_for
+from backend.agents.tools import ENVIRONMENT_NOTE, VISION_NOTE, GuestToolExecutor, HostHandler, tools_for
 from backend.config import ProviderSettings, Settings
 from backend.db.models import Agent, Approval, ChannelMessage, Message, Run, ToolCall, utcnow
 from backend.logging_config import get_logger
@@ -368,6 +368,8 @@ class RunService:
             .limit(HISTORY_MESSAGES)
         ).all()
         system = f"{agent.system_prompt.strip()}\n\n{ENVIRONMENT_NOTE}".strip()
+        if agent.vision_enabled:
+            system = f"{system}\n\n{VISION_NOTE}"
         if recalled:
             system = f"{system}\n\n{recalled}"
         history = [ChatMessage(role="system", content=system)]
@@ -419,6 +421,7 @@ class RunService:
                     tools,
                     self._settings.screenshots_dir(agent.name),
                     self._channel_handlers(agent, run.hops, run_id),
+                    vision=agent.vision_enabled,
                 )
                 result = await run_agent_loop(
                     self._provider(agent),

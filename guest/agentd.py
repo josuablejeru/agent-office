@@ -69,6 +69,8 @@ OPERATIONS: dict[str, Operation] = {
     "browser.scroll": BROWSER.scroll,
     "browser.extract_text": BROWSER.extract_text,
     "browser.screenshot": BROWSER.screenshot,
+    "browser.click_at": BROWSER.click_at,
+    "browser.type_text": BROWSER.type_text,
     "browser.current_url": BROWSER.current_url,
     "browser.close": BROWSER.close,
     "memory.remember": memory_remember,

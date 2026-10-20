@@ -24,6 +24,7 @@ export interface Agent {
   jev_enabled: boolean;
   permissions: Record<string, Level>;
   unknown_action: UnknownAction;
+  vision_enabled: boolean;
   vm_memory_mb: number;
   vm_cpus: number;
   vm_status: VmStatus;
@@ -41,6 +42,7 @@ export interface AgentCreate {
   jev_enabled: boolean;
   permissions: Record<string, Level>;
   unknown_action: UnknownAction;
+  vision_enabled: boolean;
   vm_memory_mb: number;
   vm_cpus: number;
 }

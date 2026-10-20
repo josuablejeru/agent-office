@@ -55,3 +55,15 @@ Your settings can only make an agent more restricted:
 - A tool switched back on in the middle of a task is offered to the model from the next task.
 - With "Run commands" allowed, an agent can do in the shell most of what other tools do (read
   files, fetch pages). To really confine an agent, restrict "Run commands" first.
+
+## Sight (added later)
+"Let the model see the screen" on the Permissions tab: screenshots after browser
+actions go to the model, with element numbers drawn on them, and two tools
+(`browser_click_at`, `browser_type_text`) act by position. They belong to the
+Browser group, so "Ask me first" and "Not allowed" cover them. Checked: exact
+wire formats for Anthropic and OpenAI-style models (unit tests); on a real VM a
+canvas click landed on the requested pixel, a button inside a frame was pressed,
+an unlabelled editor received typed text, the model's request carried the
+screenshot and nothing stored held an image. With `qwen3-vl:8b` the agent found a
+red square on a canvas and clicked near, but not on, it: the small model's
+localisation is imprecise. Not checked: Claude or Gemini with sight.

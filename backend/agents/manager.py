@@ -55,6 +55,7 @@ def agent_to_yaml_dict(agent: Agent) -> dict[str, Any]:
     data["permissions"] = {
         **permissions_of(agent),
         "unknown_action": agent.unknown_action,
+        "vision": agent.vision_enabled,
     }
     return data
 
@@ -96,8 +97,9 @@ class AgentManager:
         agent = self.get(agent_id)
         changes = payload.model_dump(exclude_unset=True)
         levels = changes.pop("permissions", None) or {}
-        if changes.get("unknown_action", "") is None:
-            del changes["unknown_action"]
+        for optional in ("unknown_action", "vision_enabled"):
+            if optional in changes and changes[optional] is None:
+                del changes[optional]
         # The older on/off switches, when sent alone, still mean what they say.
         for group, switch in (("shell", "perm_shell"), ("files", "perm_files"), ("browser", "perm_browser")):
             if switch in changes and group not in levels and changes[switch] is not None:

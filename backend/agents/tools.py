@@ -55,6 +55,16 @@ def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
 
 
 # Provider APIs restrict tool names to [A-Za-z0-9_-], hence shell_exec for shell.exec.
+VISION_NOTE = (
+    "You can see the screen: after each browser action you receive a screenshot of the visible "
+    "page. Clickable elements carry their number from the element list in a small red badge; "
+    "prefer acting by that number (browser_click, browser_type). For things without a number "
+    "(drawings, maps, charts, icons, embedded frames) use browser_click_at with a position read "
+    "off the latest screenshot, in its pixels from the top-left corner, then browser_type_text "
+    "to type into what has focus. Look at the screenshot to check that an action did what you "
+    "intended before going on."
+)
+
 ALL_TOOLS: list[AgentTool] = [
     AgentTool(
         operation="shell.exec",
@@ -346,10 +356,66 @@ def store_screenshot(result: dict[str, Any], directory: Path) -> dict[str, Any]:
     return {**result, "screenshot": filename, "note": "Screenshot saved and shown to the user."}
 
 
+# Offered only to agents whose model sees the screen: positions mean nothing without it.
+VISION_TOOLS: list[AgentTool] = [
+    AgentTool(
+        operation="browser.click_at",
+        permission="browser",
+        spec=ToolSpec(
+            name="browser_click_at",
+            description=(
+                "Click a position on the page, read off the latest screenshot (pixels from its "
+                "top-left corner). For things that have no element number."
+            ),
+            parameters=_schema(
+                {
+                    "x": {"type": "number", "description": "Pixels from the left edge"},
+                    "y": {"type": "number", "description": "Pixels from the top edge"},
+                    "button": {"type": "string", "enum": ["left", "right", "middle"]},
+                    "double": {"type": "boolean", "description": "Double-click"},
+                },
+                ["x", "y"],
+            ),
+        ),
+    ),
+    AgentTool(
+        operation="browser.type_text",
+        permission="browser",
+        spec=ToolSpec(
+            name="browser_type_text",
+            description=(
+                "Type text with the keyboard into whatever has focus, for example after "
+                "browser_click_at on a text field, a canvas or an editor."
+            ),
+            parameters=_schema(
+                {"text": {"type": "string"}, "submit": {"type": "boolean", "description": "Press Enter after"}},
+                ["text"],
+            ),
+        ),
+    ),
+]
+VISION_SCREENSHOT = ToolSpec(
+    name="browser_screenshot",
+    description="Look at the page again: a fresh screenshot, with element numbers drawn on it.",
+    parameters=_schema({}, []),
+)
+# Browser actions after which a model that can see gets a screenshot.
+LOOKS_AFTER = {
+    "browser.goto", "browser.click", "browser.type", "browser.press", "browser.scroll",
+    "browser.extract_text", "browser.click_at", "browser.type_text", "browser.screenshot",
+}
+
+
 def tools_for(agent: Agent) -> list[AgentTool]:
     """The tools offered to the model: everything not switched off for this agent."""
     levels = permissions_of(agent)
-    return [tool for tool in ALL_TOOLS if levels.get(tool.permission, "off") != "off"]
+    tools = list(ALL_TOOLS)
+    if agent.vision_enabled:
+        tools = [
+            tool.model_copy(update={"spec": VISION_SCREENSHOT}) if tool.spec.name == "browser_screenshot" else tool
+            for tool in tools
+        ] + VISION_TOOLS
+    return [tool for tool in tools if levels.get(tool.permission, "off") != "off"]
 
 
 class GuestToolExecutor:
@@ -361,11 +427,20 @@ class GuestToolExecutor:
         tools: list[AgentTool],
         screenshot_dir: Path,
         host_handlers: dict[str, HostHandler] | None = None,
+        vision: bool = False,
     ) -> None:
         self._client = client
         self._screenshot_dir = screenshot_dir
         self._host_handlers = host_handlers or {}
         self._operations = {tool.spec.name: tool.operation for tool in tools}
+        # The model sees the screen: browser actions are followed by a screenshot for it.
+        self._vision = vision
+        self._images: list[str] = []
+
+    def take_images(self) -> list[str]:
+        """The screenshots for the model from the last call, once (they are not kept)."""
+        images, self._images = self._images, []
+        return images
 
     def operation_for(self, tool_name: str) -> str | None:
         return self._operations.get(tool_name)
@@ -378,10 +453,31 @@ class GuestToolExecutor:
             return await self._host_handlers[operation](call.arguments)
         requested = call.arguments.get("timeout")
         timeout = float(requested) if isinstance(requested, (int, float)) else 60.0
+        arguments = call.arguments
+        if self._vision and operation == "browser.screenshot":
+            arguments = {**arguments, "marks": True}
         try:
-            result = await self._client.call(operation, call.arguments, timeout=timeout)
+            result = await self._client.call(operation, arguments, timeout=timeout)
         except GuestError as exc:
             if "unknown operation" in str(exc):
                 return {"error": OUTDATED_DAEMON}
-            return {"error": str(exc)}
-        return store_screenshot(result, self._screenshot_dir)
+            result = {"error": str(exc)}
+        if not self._vision or operation not in LOOKS_AFTER:
+            return store_screenshot(result, self._screenshot_dir)
+        if operation == "browser.screenshot" and "error" not in result:
+            shot = result
+            result = {key: value for key, value in result.items() if key != IMAGE_FIELD}
+        else:
+            # What the page looks like now, also after a failed action.
+            try:
+                shot = await self._client.call("browser.screenshot", {"marks": True}, timeout=30.0)
+            except GuestError:
+                return result
+        image = shot.get(IMAGE_FIELD)
+        stored = store_screenshot(dict(shot), self._screenshot_dir)
+        if isinstance(image, str) and "screenshot" in stored:
+            self._images.append(image)
+            result = {**result, "screenshot": stored["screenshot"], "view": {
+                "width": shot.get("width"), "height": shot.get("height")}}
+            result.pop("note", None)
+        return result

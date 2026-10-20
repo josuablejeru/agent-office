@@ -16,6 +16,7 @@ other. Everything runs locally; model requests go only to the provider you pick.
 | Chat, run limits, stop button, conversation clearing | working |
 | Safety rules with approval dialog (allow once / reject) | working |
 | Permissions per agent: allowed, ask first or not allowed for each kind of tool | working |
+| Sight: screenshots to the model, clicking and typing by position (per agent, off by default) | working; checked with a scripted model and a small local model |
 | Split DNS, so agents resolve VPN-internal names like the Mac does | working with a stand-in server; not tried on a real VPN |
 | Shared channels, `@mention` hand-offs between agents | working |
 | Characters with drawn avatars, or a photo of your own | working |
@@ -185,8 +186,20 @@ Nothing in the app is tied to a particular model.
   sign in once with `gcloud auth application-default login`. Model ids are
   what Vertex calls them, for example `google/gemini-2.5-pro` for the `vertex`
   type and a Claude model id for `vertex-anthropic`.
-- Screenshots are stored on the Mac and shown to you; they are not sent to the
-  model.
+- **What the model sees of a web page.** By default the model reads pages as
+  text: the page's text and a numbered list of its links, buttons and fields,
+  which it acts on by number. Screenshots are stored on the Mac and shown to
+  you, not sent to the model. It works well on text and forms, and poorly on
+  charts, maps, drawings, icon-only buttons and canvas apps.
+- **"Let the model see the screen"** (Permissions tab, per agent, off by
+  default): after each browser action the model also gets a screenshot of the
+  page, with the element numbers drawn on it, and can click and type at a
+  position for what has no number, including inside embedded frames. Only the
+  latest two screenshots are sent, and none are stored in the conversation
+  history. Everything visible goes to the model provider, and each step takes
+  longer and costs more. It needs a model that reads images and uses tools
+  (Claude, Gemini, GPT-4o, or locally for example `qwen3-vl`); small local
+  models see the page but are imprecise about where things are.
 
 Models differ a great deal in how reliably they use tools. The action list in
 each conversation shows what an agent actually did, independent of what it

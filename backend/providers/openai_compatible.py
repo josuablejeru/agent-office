@@ -12,12 +12,14 @@ import httpx
 
 from backend.logging_config import get_logger
 from backend.providers.base import (
+    OMITTED_IMAGE_NOTE,
     ChatMessage,
     ModelProvider,
     ModelResponse,
     ProviderError,
     ToolCallRequest,
     ToolSpec,
+    images_to_send,
 )
 
 log = get_logger("providers")
@@ -53,6 +55,52 @@ def to_wire_message(message: ChatMessage) -> dict[str, Any]:
     return wire
 
 
+def to_wire_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
+    """The conversation in the OpenAI format, with screenshots where this format allows them.
+
+    A tool message cannot carry an image, and nothing may come between the tool
+    results of one assistant turn. So the images of a turn's results follow
+    them, in one user message.
+    """
+    sent_images = images_to_send(messages)
+    wire: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        if message.role != "tool" and pending:
+            wire.append({"role": "user", "content": pending})
+            pending = []
+        entry = to_wire_message(message)
+        if message.images:
+            if index in sent_images:
+                if not pending:
+                    pending.append({"type": "text", "text": "Screenshots of the page after these actions:"})
+                pending += [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}}
+                    for image in message.images
+                ]
+            else:
+                entry["content"] = f"{entry['content']}\n{OMITTED_IMAGE_NOTE}"
+        wire.append(entry)
+    if pending:
+        wire.append({"role": "user", "content": pending})
+    return wire
+
+
+def has_images(wire: list[dict[str, Any]]) -> bool:
+    return any(
+        isinstance(message.get("content"), list)
+        and any(isinstance(part, dict) and part.get("type") == "image_url" for part in message["content"])
+        for message in wire
+    )
+
+
+def _text_size(content: Any) -> int:
+    """Characters of text in a message; images do not count against a text budget."""
+    if isinstance(content, list):
+        return sum(len(part.get("text", "")) for part in content if isinstance(part, dict))
+    return len(str(content or ""))
+
+
 def fit_context(wire: list[dict[str, Any]], budget_chars: int) -> list[dict[str, Any]]:
     """Shorten the oldest tool results until the conversation fits the budget.
 
@@ -61,7 +109,7 @@ def fit_context(wire: list[dict[str, Any]], budget_chars: int) -> list[dict[str,
     give up instead; the most recent results are always kept whole.
     """
     def size() -> int:
-        return sum(len(str(message.get("content") or "")) for message in wire)
+        return sum(_text_size(message.get("content")) for message in wire)
 
     tool_indexes = [i for i, message in enumerate(wire) if message["role"] == "tool"]
     for index in tool_indexes[:-KEEP_RECENT_TOOL_RESULTS]:
@@ -180,9 +228,15 @@ class OpenAICompatibleProvider(ModelProvider):
             ) from exc
         if response.status_code >= 400:
             # Provider error bodies describe the problem and never echo the key.
+            hint = ""
+            if response.status_code in (400, 415, 422) and body and has_images(body.get("messages", [])):
+                hint = (
+                    " The request included screenshots: if this model cannot read images, switch off "
+                    "\"Let the model see the screen\" for this agent, or choose a model that can."
+                )
             raise ProviderError(
                 f"{self._base_url} answered with an error ({response.status_code}): "
-                f"{error_message(response)}"
+                f"{error_message(response)}{hint}"
             )
         try:
             return response.json()
@@ -194,7 +248,7 @@ class OpenAICompatibleProvider(ModelProvider):
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
     ) -> ModelResponse:
-        wire = [to_wire_message(message) for message in messages]
+        wire = to_wire_messages(messages)
         if self._context_chars:
             wire = fit_context(wire, self._context_chars)
         body: dict[str, Any] = {**self._extra_body, "model": self._model, "messages": wire}

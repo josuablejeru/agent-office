@@ -174,8 +174,12 @@ async def _loop(
                 return _stopped(StopReason.REPEAT_LIMIT, limits.max_repeated_identical_calls)
             executed += 1
             result = await _handle_call(call, executor, evaluate, observer, clock)
+            # Screenshots for a model that can see come separately from the result,
+            # which is stored: images stay out of the database.
+            take_images = getattr(executor, "take_images", None)
+            images = take_images() if take_images else []
             messages.append(
-                ChatMessage(role="tool", content=json.dumps(result), tool_call_id=call.id)
+                ChatMessage(role="tool", content=json.dumps(result), tool_call_id=call.id, images=images)
             )
 
 

@@ -65,6 +65,7 @@ export function AgentForm({
     jev_enabled: agent?.jev_enabled ?? false,
     permissions: agent?.permissions ?? {},
     unknown_action: agent?.unknown_action ?? "default",
+    vision_enabled: agent?.vision_enabled ?? false,
     vm_memory_mb: agent?.vm_memory_mb ?? 4096,
     vm_cpus: agent?.vm_cpus ?? 4,
   });
@@ -204,6 +205,8 @@ export function AgentForm({
             }
             onUnknownAction={(value) => set("unknown_action", value)}
             onJev={(enabled) => set("jev_enabled", enabled)}
+            visionEnabled={form.vision_enabled}
+            onVision={(enabled) => set("vision_enabled", enabled)}
           />
         )}
 

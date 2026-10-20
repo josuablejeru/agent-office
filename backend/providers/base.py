@@ -28,6 +28,20 @@ class ChatMessage(BaseModel):
     tool_call_id: str | None = None
     # Opaque data a provider attached to its own assistant turn (see ModelResponse).
     provider_data: dict[str, Any] | None = None
+    # Screenshots (base64 JPEG) that go with a tool result, for models that can see.
+    # Held only in memory for the run: never stored or logged.
+    images: list[str] = Field(default_factory=list)
+
+
+# Screenshots are large: only the most recent ones are sent, older ones become a note.
+KEEP_RECENT_IMAGES = 2
+OMITTED_IMAGE_NOTE = "[an earlier screenshot was here; only the latest are kept]"
+
+
+def images_to_send(messages: list[ChatMessage], keep: int = KEEP_RECENT_IMAGES) -> set[int]:
+    """Indexes of the messages whose images are still sent."""
+    with_images = [index for index, message in enumerate(messages) if message.images]
+    return set(with_images[-keep:]) if keep > 0 else set()
 
 
 class ToolSpec(BaseModel):

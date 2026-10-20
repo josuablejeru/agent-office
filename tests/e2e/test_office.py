@@ -352,6 +352,56 @@ def test_pip_fetches_through_the_company_repository_set_in_settings(office: Offi
         office.api("DELETE", "/api/system/packages")
 
 
+VISUAL_PAGE = """<!doctype html><title>Visual</title>
+<style>body{margin:0;font:14px sans-serif} #log{position:absolute;left:0;top:440px}</style>
+<canvas id="c" width="400" height="300" style="position:absolute;left:0;top:0;background:#eef"></canvas>
+<iframe style="position:absolute;left:500px;top:0;width:300px;height:200px;border:0"
+  srcdoc="<button style='width:280px;height:180px' onclick='parent.note(&quot;frame button pressed&quot;)'></button>"></iframe>
+<div id="editor" contenteditable="true" style="position:absolute;left:0;top:320px;width:400px;height:100px;background:#ffe"></div>
+<p id="log"></p>
+<script>
+  function note(t) { document.getElementById('log').textContent += t + '; '; }
+  document.getElementById('c').addEventListener('click', (e) => note('canvas ' + e.offsetX + ',' + e.offsetY));
+</script>
+"""
+
+
+def test_an_agent_that_sees_can_click_by_position_and_type(office: Office, team: dict[str, int]) -> None:
+    alice = team["alice"]
+    office.api("PATCH", f"/api/agents/{alice}", json={"vision_enabled": True})
+    try:
+        office.model.script("alice", [
+            tool("file_write", path="visual/index.html", content=VISUAL_PAGE),
+            tool("shell_exec", command="cd ~/visual && python3 -m http.server 8898 >/dev/null 2>&1 & sleep 1; echo up"),
+            tool("browser_goto", url="http://127.0.0.1:8898/index.html"),
+            tool("browser_click_at", x=123, y=45),          # on the canvas
+            tool("browser_click_at", x=650, y=100),         # the button inside the frame
+            tool("browser_click_at", x=100, y=360),         # into the editor, which has no label
+            tool("browser_type_text", text="hello from the agent"),
+            tool("browser_read"),
+            "done",
+        ])
+        run = office.ask(alice)
+        assert run["status"] == "completed", run["error"]
+        page = result(run, -1)
+        assert "canvas 123,45" in page["text"]  # where it clicked is where the page saw the click
+        assert "frame button pressed" in page["text"]
+        assert "hello from the agent" in page["text"]
+        assert "screenshot" in result(run, 2) and result(run, 2)["view"]["width"] > 400
+
+        # The model was shown the screen; nothing stored holds an image.
+        last_request = office.model.requests["alice"][-1]["messages"]
+        shown = [part for message in last_request if isinstance(message["content"], list)
+                 for part in message["content"] if part.get("type") == "image_url"]
+        assert 1 <= len(shown) <= 2 and shown[0]["image_url"]["url"].startswith("data:image/jpeg;base64,/9j/")
+        assert "base64" not in json.dumps(run["tool_calls"])
+        # The numbers drawn for the screenshot are gone from the page again.
+        assert page["text"].strip().endswith(";")
+    finally:
+        office.api("PATCH", f"/api/agents/{alice}", json={"vision_enabled": False})
+        shell(office, "alice", alice, "pkill -f 'http.server 8898'; true")
+
+
 def test_turning_a_computer_off_stops_the_agents_task(office: Office, team: dict[str, int]) -> None:
     bob = team["bob"]
     office.model.script("bob", [tool("shell_exec", command="sleep 120"), "never reached"])
