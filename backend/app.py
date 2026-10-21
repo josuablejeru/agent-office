@@ -178,6 +178,10 @@ def main() -> int:
         text_select=True,
     )
     WindowApi._window = window
+    # Updating: the launcher (our parent) powers the VMs off once the window closes;
+    # the update helper waits for it to exit before swapping the app.
+    app.state.updater.launcher_pid = os.getppid()
+    app.state.updater.quit_app = window.destroy
     webview.start(on_window_ready, window)
 
     # Not reached when the app is quit with Cmd-Q, which ends the process inside

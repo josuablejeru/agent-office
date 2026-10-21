@@ -6,6 +6,7 @@ import { Avatar } from "./Avatar";
 import { ChannelView } from "./ChannelView";
 import { parseRoute, routeFor, type View } from "./route";
 import { SettingsPage } from "./SettingsPage";
+import { UpdateBanner } from "./UpdateBanner";
 import { SetupBanner } from "./SetupBanner";
 import { TokenPrompt } from "./TokenPrompt";
 import type { Agent, Capabilities, Channel, Provider } from "./types";
@@ -227,6 +228,7 @@ export function App() {
           </div>
         )}
         {error && <div className="notice error">{error}</div>}
+        {authorized && <UpdateBanner />}
         {authorized && capabilities?.ready && <SetupBanner />}
         {view?.kind === "settings" ? (
           <SettingsPage

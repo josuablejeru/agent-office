@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { ModelTest } from "./ModelTest";
 import { PackageRepositorySettings } from "./PackageRepository";
-import type { DnsStatus, Provider } from "./types";
+import type { DnsStatus, Provider, UpdateStatus } from "./types";
 
 export type SettingsSection = "general" | "network" | "packages" | "models";
 
@@ -182,6 +182,9 @@ function AddProvider({ onChanged }: { onChanged: () => Promise<void> }) {
 /** Settings, as a page of its own (#/settings/<section>). */
 export function SettingsPage({ providers, section, onChanged }: Props) {
   const [keepRunning, setKeepRunning] = useState<boolean | null>(null);
+  const [checkUpdates, setCheckUpdates] = useState<boolean | null>(null);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [checking, setChecking] = useState(false);
   const [dns, setDns] = useState<DnsStatus | null>(null);
   const [certificateError, setCertificateError] = useState<string | null>(null);
 
@@ -208,7 +211,14 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
   useEffect(() => {
     void api
       .getSettings()
-      .then((settings) => setKeepRunning(settings.keep_vms_running_on_quit))
+      .then((settings) => {
+        setKeepRunning(settings.keep_vms_running_on_quit);
+        setCheckUpdates(settings.check_updates);
+      })
+      .catch(() => undefined);
+    void api
+      .updateStatus()
+      .then(setUpdate)
       .catch(() => undefined);
     void api
       .dnsStatus()
@@ -218,7 +228,25 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
 
   async function toggleKeepRunning(next: boolean) {
     setKeepRunning(next);
-    await api.setSettings({ keep_vms_running_on_quit: next }).catch(() => setKeepRunning(!next));
+    await api
+      .setSettings({ keep_vms_running_on_quit: next, check_updates: checkUpdates ?? true })
+      .catch(() => setKeepRunning(!next));
+  }
+
+  async function toggleCheckUpdates(next: boolean) {
+    setCheckUpdates(next);
+    await api
+      .setSettings({ keep_vms_running_on_quit: keepRunning ?? false, check_updates: next })
+      .catch(() => setCheckUpdates(!next));
+  }
+
+  async function checkNow() {
+    setChecking(true);
+    try {
+      setUpdate(await api.checkForUpdate());
+    } finally {
+      setChecking(false);
+    }
   }
 
   return (
@@ -242,6 +270,33 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
       <div className="modal settings-body">
         {section === "general" && (
           <>
+            <h3>Updates</h3>
+            <p className="hint">
+              This is Agent Office <strong>{update?.current ?? "…"}</strong>.{" "}
+              {update?.available
+                ? `${update.latest} is available: see the banner at the top.`
+                : update?.checked_at
+                  ? `It is up to date (last checked ${new Date(update.checked_at * 1000).toLocaleString()}).`
+                  : "It has not checked for updates yet."}
+              {update?.state === "error" && update.detail && <> {update.detail}</>}
+            </p>
+            <div className="modal-actions">
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={checkUpdates ?? true}
+                  disabled={checkUpdates === null}
+                  onChange={(e) => void toggleCheckUpdates(e.target.checked)}
+                />
+                Check for updates once a day (asks GitHub for the latest release)
+              </label>
+              <span className="spacer" />
+              <button type="button" disabled={checking} onClick={() => void checkNow()}>
+                {checking ? "Checking…" : "Check now"}
+              </button>
+            </div>
+
+            <h3>When you quit</h3>
 
         <label className="toggle">
           <input

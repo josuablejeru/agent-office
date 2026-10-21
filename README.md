@@ -84,7 +84,15 @@ Apple Developer ID and notarized is blocked by macOS when downloaded; build it
 yourself instead (`scripts/build-app.sh`), or remove the download mark with
 `xattr -dr com.apple.quarantine "/Applications/Agent Office.app"`.
 
-**Updating:** quit the app, replace it in Applications with the new one and
+**Updating:** from v0.5 on, the app looks for a new release once a day and
+shows a banner when there is one: **Update** downloads it, checks that it is
+an Apple-notarized app signed with this project's Developer ID and newer than
+yours, and **Restart to update** quits (shutting agents' computers down as
+usual), swaps the app and opens the new one. The previous version is kept in
+`~/.config/agent-office/updates/previous`. It does not update while an agent is
+working. The check asks GitHub's API for the latest release; switch it off
+under Settings › General. Where `/Applications` cannot be changed (managed
+Macs), the banner links to the download instead. Earlier versions: quit the app, replace it in Applications with the new one and
 open it again. Your agents, their disks and settings live in
 `~/.config/agent-office` and are kept; each agent's computer picks up the new
 tools the next time it is turned on. macOS may ask once more for Local Network

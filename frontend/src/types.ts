@@ -89,6 +89,7 @@ export interface DnsStatus {
 
 export interface AppSettings {
   keep_vms_running_on_quit: boolean;
+  check_updates: boolean;
 }
 
 export interface ModelStatus {
@@ -134,6 +135,21 @@ export interface ChannelMessage {
   author: string;
   content: string;
   created_at: string;
+}
+
+export interface UpdateStatus {
+  current: string;
+  latest: string;
+  available: boolean;
+  notes: string;
+  published: string;
+  state: "idle" | "checking" | "downloading" | "ready" | "installing" | "error";
+  progress: number;
+  detail: string;
+  can_install: boolean;
+  install_note: string;
+  checked_at: number;
+  dismissed: string;
 }
 
 export interface BaseImageStatus {

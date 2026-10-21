@@ -5,13 +5,14 @@ Run with:  uvicorn --factory backend.main:create_app --host 127.0.0.1 --port 800
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
-from sqlmodel import Session
+from sqlmodel import Session, select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.agents.channels import ChannelService
@@ -27,6 +28,7 @@ from backend.api import vm as vm_api
 from backend.api.deps import require_api_token
 from backend.config import ProviderSettings, Settings
 from backend.db.database import create_db_engine, init_db
+from backend.db.models import Agent
 from backend.instance import acquire_instance_lock
 from backend.keystore import KeyStore
 from backend.logging_config import configure_logging, get_logger
@@ -37,6 +39,7 @@ from backend.policy.approvals import ApprovalBroker
 from backend.policy.setup import build_policy_engine
 from backend.providers.base import ModelProvider
 from backend.providers.registry import build_provider
+from backend.updates import Updater
 from backend.vm.base_image import BaseImageBuilder
 from backend.vm.lifecycle import QemuVMManager, VMStatus
 
@@ -56,6 +59,16 @@ async def recover_vm_states(app: FastAPI) -> None:
             manager.set_vm_status(agent, vm_status)
 
 
+async def check_for_updates_daily(app: FastAPI) -> None:
+    """Look for a new release at start and then once a day, unless switched off."""
+    while True:
+        enabled = (app.state.settings.load_config().get("app") or {}).get("check_updates", True)
+        # Only the installed app checks by itself: not tests, not a development server.
+        if enabled and app.state.updater.bundle is not None and app.state.updater.check_due():
+            await app.state.updater.check(quiet=True)
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Held until the process exits: a second backend on this directory must not start.
@@ -66,7 +79,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await recover_vm_states(app)
     app.state.run_service.mark_interrupted()
     app.state.channels.ensure_default()
+    update_checks = asyncio.create_task(check_for_updates_daily(app))
     yield
+    update_checks.cancel()
     if app.state.dns is not None:
         app.state.dns.stop()
     app.state.instance_lock.close()
@@ -150,6 +165,19 @@ def create_app(
         provider_factory=provider_factory,
         channels=app.state.channels,
     )
+
+    def busy() -> str | None:
+        """What an update would interrupt right now."""
+        with Session(engine) as session:
+            agents = session.exec(select(Agent)).all()
+        working = [a.name for a in agents if a.id is not None and app.state.run_service.activity(a.id) != "idle"]
+        if working:
+            return f"{', '.join(working)} {'is' if len(working) == 1 else 'are'} working"
+        if app.state.base_image_builder.status().building:
+            return "the system image is being built"
+        return None
+
+    app.state.updater = Updater(settings, busy=busy)
 
     protected = [Depends(require_api_token)]
     app.include_router(agents_api.router, dependencies=protected)

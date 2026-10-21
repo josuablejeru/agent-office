@@ -1509,3 +1509,32 @@ textarea:focus {
   border-radius: 0;
   background: transparent;
 }
+
+/* Updates */
+
+.notice.update {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--text);
+}
+
+.update-text {
+  min-width: 0;
+}
+
+.update-notes {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.button-link {
+  display: inline-block;
+  text-decoration: none;
+  border-radius: 999px;
+  padding: 8px 16px;
+}

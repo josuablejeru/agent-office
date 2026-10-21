@@ -27,6 +27,7 @@ from backend.providers.base import ProviderError
 from backend.providers.check import ModelCheck, check_model
 from backend.providers.registry import build_provider
 from backend.providers.vertex import LOGIN_HINT, credentials_available, credentials_summary
+from backend.updates import UpdateStatus
 from backend.version import is_release, running_version
 from backend.vm.base_image import BaseImageStatus
 from backend.vm.capabilities import Capabilities, detect_capabilities
@@ -74,7 +75,9 @@ class ModelTestRequest(BaseModel):
 
 
 class AppSettings(BaseModel):
-    keep_vms_running_on_quit: bool
+    keep_vms_running_on_quit: bool = False
+    # Look for new releases on GitHub once a day.
+    check_updates: bool = True
 
 
 class ModelStatus(BaseModel):
@@ -321,7 +324,34 @@ async def get_app_settings(settings: SettingsDep) -> AppSettings:
 @router.put("/settings")
 async def set_app_settings(payload: AppSettings, settings: SettingsDep) -> AppSettings:
     settings.update_user_config(["app", "keep_vms_running_on_quit"], payload.keep_vms_running_on_quit)
+    settings.update_user_config(["app", "check_updates"], payload.check_updates)
     return payload
+
+
+@router.get("/system/update")
+async def update_status(request: Request) -> UpdateStatus:
+    return request.app.state.updater.status()
+
+
+@router.post("/system/update/check")
+async def check_for_update(request: Request) -> UpdateStatus:
+    return await request.app.state.updater.check(quiet=False)
+
+
+@router.post("/system/update/download")
+async def download_update(request: Request) -> UpdateStatus:
+    return request.app.state.updater.start_download()
+
+
+@router.post("/system/update/install")
+async def install_update(request: Request) -> UpdateStatus:
+    """Quit and restart into the downloaded, verified version."""
+    return request.app.state.updater.install()
+
+
+@router.post("/system/update/dismiss")
+async def dismiss_update(request: Request) -> UpdateStatus:
+    return request.app.state.updater.dismiss()
 
 
 @router.get("/agents/{agent_id}/model-status", tags=["agents"])
