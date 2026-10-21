@@ -549,6 +549,8 @@ textarea:focus {
 .token-prompt {
   position: fixed;
   inset: 0;
+  /* Above everything on the page, sticky headers included. */
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
