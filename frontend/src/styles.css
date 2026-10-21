@@ -1401,3 +1401,48 @@ textarea:focus {
 .vision-setting .hint {
   margin: 6px 0 0;
 }
+
+/* Copying, and which build is running */
+
+.message-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.message:hover .message-actions,
+.channel-message:hover .message-actions,
+.tool-output:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
+}
+
+.copy-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.copy-button:hover {
+  color: var(--text);
+}
+
+.tool-output {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-version {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 2px 12px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  user-select: text;
+}

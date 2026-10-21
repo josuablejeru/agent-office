@@ -68,7 +68,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           # macOS wants a plain x.y.z; the full tag stays in the file name.
-          INSTALL_DIR= APP_VERSION="${VERSION%%-*}" scripts/build-app.sh
+          INSTALL_DIR= APP_VERSION="${VERSION%%-*}" APP_VERSION_LABEL="$GITHUB_REF_NAME" scripts/build-app.sh
           cd dist
           ditto -c -k --keepParent "Agent Office.app" "Agent-Office-$VERSION-macos-arm64.zip"
           shasum -a 256 "Agent-Office-$VERSION-macos-arm64.zip" > "Agent-Office-$VERSION-macos-arm64.zip.sha256"

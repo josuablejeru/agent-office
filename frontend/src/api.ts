@@ -140,6 +140,7 @@ export const api = {
   postToChannel: (id: number, content: string) =>
     request<ChannelMessage>(`/api/channels/${id}/messages`, post({ content })),
   dnsStatus: () => request<DnsStatus>("/api/system/dns"),
+  version: () => request<{ version: string; release: boolean }>("/api/system/version"),
   packageRepository: () => request<PackageRepository>("/api/system/packages"),
   savePackageRepository: (payload: PackageRepositoryUpdate) =>
     request<PackageRepository>("/api/system/packages", { method: "PUT", body: JSON.stringify(payload) }),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -26,6 +27,7 @@ from backend.providers.base import ProviderError
 from backend.providers.check import ModelCheck, check_model
 from backend.providers.registry import build_provider
 from backend.providers.vertex import LOGIN_HINT, credentials_available, credentials_summary
+from backend.version import is_release, running_version
 from backend.vm.base_image import BaseImageStatus
 from backend.vm.capabilities import Capabilities, detect_capabilities
 from backend.vm.errors import VMError
@@ -302,6 +304,13 @@ async def remove_certificate(fingerprint: str, request: Request) -> None:
     if not request.app.state.certificates.remove(fingerprint):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such certificate was added in the app.")
     log.info("root certificate removed")
+
+
+@router.get("/system/version")
+async def app_version() -> dict[str, Any]:
+    """Which build is running, for the sidebar."""
+    version = running_version()
+    return {"version": version, "release": is_release(version)}
 
 
 @router.get("/settings")

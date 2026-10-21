@@ -173,7 +173,9 @@ def main() -> int:
     # The token rides in the URL fragment, which is never sent to the server or logged.
     url = f"http://{LOOPBACK}:{port}/#token={app.state.api_token}"
     window = webview.create_window(
-        APP_NAME, url, width=1440, height=900, min_size=(900, 600), js_api=WindowApi()
+        APP_NAME, url, width=1440, height=900, min_size=(900, 600), js_api=WindowApi(),
+        # pywebview turns text selection off unless asked: agents' output must be copyable.
+        text_select=True,
     )
     WindowApi._window = window
     webview.start(on_window_ready, window)

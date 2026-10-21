@@ -28,6 +28,15 @@ export function App() {
   const [view, setView] = useState<View>(null);
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [version, setVersion] = useState<{ version: string; release: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!authorized) return;
+    void api
+      .version()
+      .then(setVersion)
+      .catch(() => undefined);
+  }, [authorized]);
   const [error, setError] = useState<string | null>(null);
   // Name being typed for a new channel; null while not adding one.
   const [newChannel, setNewChannel] = useState<string | null>(null);
@@ -179,6 +188,11 @@ export function App() {
         <button className="sidebar-link" onClick={() => setSettingsOpen(true)}>
           Settings
         </button>
+        {version && (
+          <div className="sidebar-version" title={version.release ? "Release" : "Local build: git commit"}>
+            {version.release ? version.version : `local build ${version.version}`}
+          </div>
+        )}
         <div className="sidebar-foot">Local‑first · your keys stay on this Mac</div>
       </aside>
 

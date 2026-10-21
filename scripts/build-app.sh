@@ -10,6 +10,7 @@
 #        INSTALL_DIR=~/Applications scripts/build-app.sh
 #        INSTALL_DIR= scripts/build-app.sh   build only (dist/Agent Office.app)
 #        APP_VERSION=1.2.3 ...               version shown by macOS (default: pyproject.toml)
+#        APP_VERSION_LABEL=v1.2.3 ...        version shown in the app (default: git describe)
 #        SIGN_IDENTITY="Developer ID Application: ..." ...   sign for distribution
 #                                            (see scripts/sign-and-notarize.sh)
 set -euo pipefail
@@ -37,6 +38,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$RES/app/frontend" "$RES/app/scripts"
 rsync -a --exclude '__pycache__' backend guest "$RES/app/"
 cp scripts/create-base-image.sh "$RES/app/scripts/"
+# Which build this is, shown under Settings: the release tag, or the commit of a local build.
+LABEL="${APP_VERSION_LABEL:-$(git describe --tags --always --dirty 2>/dev/null || echo "v$VERSION-local")}"
+printf '%s\n' "$LABEL" >"$RES/app/VERSION"
+echo "    version $LABEL"
 cp -R frontend/dist "$RES/app/frontend/dist"
 
 echo "==> Bundling Python $PYTHON_VERSION"

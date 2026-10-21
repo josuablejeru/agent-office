@@ -1,5 +1,6 @@
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
+import { CopyButton } from "./CopyButton";
 import remarkGfm from "remark-gfm";
 import { api } from "./api";
 import { ApprovalModal } from "./ApprovalModal";
@@ -50,7 +51,18 @@ function ToolCalls({ agentId, calls }: { agentId: number; calls: ToolCall[] }) {
                   <span className="tool-note">{OUTCOME_NOTES[call.decision]}</span>
                 )}
               </summary>
-              <pre>{JSON.stringify({ arguments: call.arguments, result: call.result }, null, 2)}</pre>
+              <div className="tool-output">
+                <div className="message-actions">
+                  {typeof call.result?.stdout === "string" && call.result.stdout && (
+                    <CopyButton text={call.result.stdout as string} label="Copy output" />
+                  )}
+                  <CopyButton
+                    text={JSON.stringify({ arguments: call.arguments, result: call.result }, null, 2)}
+                    label="Copy all"
+                  />
+                </div>
+                <pre>{JSON.stringify({ arguments: call.arguments, result: call.result }, null, 2)}</pre>
+              </div>
             </details>
             {typeof screenshot === "string" && <Screenshot agentId={agentId} filename={screenshot} />}
           </div>
@@ -162,6 +174,9 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
                   <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                     {message.content}
                   </Markdown>
+                  <div className="message-actions">
+                    <CopyButton text={message.content} />
+                  </div>
                 </div>
               ) : (
                 <div className="message user">{message.content}</div>

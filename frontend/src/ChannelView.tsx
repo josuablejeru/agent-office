@@ -1,5 +1,6 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
+import { CopyButton } from "./CopyButton";
 import remarkGfm from "remark-gfm";
 import { api } from "./api";
 import { Avatar } from "./Avatar";
@@ -133,6 +134,9 @@ export function ChannelView({ channel, agents, avatarVersion }: Props) {
                     <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                       {message.content}
                     </Markdown>
+                    <div className="message-actions">
+                      <CopyButton text={message.content} />
+                    </div>
                   </div>
                 </div>
               </div>
