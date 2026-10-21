@@ -303,8 +303,10 @@ class RunService:
             return [], {}
         tools: list[AgentTool] = []
         handlers: dict[str, HostHandler] = {}
-        for server in agent.mcp_servers:
-            for tool in await self.mcp.tools(server):
+        # All servers at once: a slow one should not add its wait to the others'.
+        listed = await asyncio.gather(*(self.mcp.tools(server) for server in agent.mcp_servers))
+        for server, server_tools in zip(agent.mcp_servers, listed, strict=True):
+            for tool in server_tools:
                 operation = f"mcp.{server}.{tool.name}"
                 tools.append(AgentTool(
                     operation=operation,

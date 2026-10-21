@@ -34,13 +34,19 @@ def login_shell() -> str:
     return shell if shell and Path(shell).is_file() else "/bin/zsh"
 
 
-def read_login_environment(shell: str | None = None) -> dict[str, str]:
-    """The environment a login shell ends up with. Empty if the shell fails or hangs."""
+def read_login_environment(shell: str | None = None, interactive: bool = False) -> dict[str, str]:
+    """The environment a login shell ends up with. Empty if the shell fails or hangs.
+
+    `interactive` also reads ~/.zshrc or ~/.bashrc, where nvm, pyenv and the
+    like usually put their PATH (fish reads config.fish either way).
+    """
     # The marker separates the environment from anything the shell's startup files print.
     command = f"echo {MARKER}; /usr/bin/env -0"
+    shell = shell or login_shell()
+    flags = ["-i", "-l"] if interactive and Path(shell).name in ("zsh", "bash") else ["-l"]
     try:
         result = subprocess.run(
-            [shell or login_shell(), "-l", "-c", command],
+            [shell, *flags, "-c", command],
             capture_output=True, timeout=TIMEOUT_SECONDS, stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
@@ -64,7 +70,8 @@ def terminal_shells() -> list[str]:
     their terminal while the account itself stays on zsh."""
     shells = [login_shell()]
     fish = next((path for path in FISH if Path(path).is_file()), None)
-    if fish and (Path.home() / ".config" / "fish").is_dir() and Path(shells[0]).name != "fish":
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "fish"
+    if fish and config.is_dir() and Path(shells[0]).name != "fish":
         shells.append(fish)
     return shells
 
@@ -78,7 +85,7 @@ def read_terminal_environment() -> dict[str, str]:
     merged: dict[str, str] = {}
     paths: list[str] = []
     for shell in terminal_shells():
-        found = read_login_environment(shell)
+        found = read_login_environment(shell, interactive=True)
         for folder in found.get("PATH", "").split(":"):
             if folder and folder not in paths:
                 paths.append(folder)

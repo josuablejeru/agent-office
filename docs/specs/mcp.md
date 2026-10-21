@@ -3,7 +3,8 @@
 > **Status (21 Oct):** built. Checked:
 > - Unit tests:
 >   - Remote servers, using a stand-in MCP server over Streamable HTTP behind a bearer token. Covered: listing, calls, a failing tool, a refused token, an unreachable server.
->   - Command servers. Covered: environment from the Keychain, one process kept across calls, a restart after a crash, a missing command, stopping when the app quits, environment edits that keep untouched values, arguments kept out of logs and error messages, no retry at every task after a failure, and the login shell's network settings winning over the app's defaults.
+>   - Command servers. Covered: environment from the Keychain, one process kept across calls, a restart after a crash, a missing command, stopping when the app quits, environment edits that keep untouched values, arguments kept out of logs and error messages, no retry at every task after a failure, a server stuck while starting given up on and stopped, and the login shell's network settings winning over the app's defaults.
+>   - Shells: fish reading `conf.d` (PATH and proxy) whether it is the account shell or only the terminal's, and `~/.zshrc` (where nvm puts its PATH).
 >   - Import from Claude Desktop.
 >   - Agent runs: ask by default, run when allowed, a rejected call never reaches the server, "Not allowed" hides the tools, and "always ask" asks even where MCP tools are allowed.
 > - In the app's window type, with a real agent computer:
@@ -35,7 +36,8 @@ tools appear in that agent's toolbox under your approval rules.
   - Started on first use and kept running.
   - Restarted after a crash or an edit, and stopped when the app quits.
   - Their output goes to `~/.config/agent-office/logs/mcp-<name>.log`, which records the command but not its arguments.
-  - They get PATH and network settings from your terminal shells: the account's shell, plus fish if you use it. That covers the proxy variables, CA variables, `npm_config_*`, `PIP_*` and `UV_*`.
+  - They get PATH and network settings from your terminal shells: zsh and bash including `~/.zshrc`/`~/.bashrc` (nvm, pyenv), and fish including `config.fish` and `conf.d`, whether fish is the account shell or only what your terminal runs. The shells are read once, off the app's main loop.
+  - A server that hasn't finished starting after 45 s during a task (120 s in Settings › Test, where npx or uvx may first download it) is stopped and retried later. That covers the proxy variables, CA variables, `npm_config_*`, `PIP_*` and `UV_*`.
   - They also get your `~/.npmrc` and pip/uv config through HOME, `UV_NATIVE_TLS=1`, and the company root certificates as `NODE_EXTRA_CA_CERTS`.
 - **The app is the MCP client.** Tokens never reach an agent's computer. Tool lists are read at the start of a task and cached for five minutes. A server that can't be reached is retried after two minutes or when you save it. At most 40 tools per server. Results are capped text and treated as untrusted, like web pages.
 

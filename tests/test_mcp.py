@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -368,3 +370,42 @@ def test_always_ask_overrides_an_allowed_mcp_level(tmp_path: Path) -> None:
         assert len(tickets.calls) == before
     finally:
         tickets.close()
+
+
+def test_a_server_that_never_starts_is_given_up_on_and_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend.net import mcp as mcp_module
+
+    monkeypatch.setattr(mcp_module, "RUN_START_TIMEOUT_SECONDS", 1.5)
+    monkeypatch.setattr(mcp_module, "FAILURE_RETRY_SECONDS", 0)
+    hang = str(Path(__file__).with_name("fake_mcp_hang.py"))
+    mcp, _, _ = registry(tmp_path)
+    mcp.save(notes_server(args=[hang]), None, {})
+
+    def running() -> int:
+        found = subprocess.run(["pgrep", "-f", hang], capture_output=True, text=True)
+        return len(found.stdout.split())
+
+    async def scenario() -> list[float]:
+        took = []
+        for _ in range(2):
+            started = time.monotonic()
+            assert await mcp.tools("notes") == []
+            took.append(time.monotonic() - started)
+            await asyncio.sleep(0.5)
+        await mcp.close()
+        return took
+
+    took = asyncio.run(scenario())
+    assert all(seconds < 6 for seconds in took)
+    time.sleep(1)
+    assert running() == 0  # each stuck start was stopped, none left behind
+
+
+def test_an_interactive_shell_file_adds_to_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """nvm and friends put their PATH in ~/.zshrc, which a login shell alone does not read."""
+    from backend.shell_env import read_login_environment
+
+    (tmp_path / ".zshrc").write_text('export PATH="/fake/nvm/bin:$PATH"\n')
+    monkeypatch.setenv("ZDOTDIR", str(tmp_path))
+    assert "/fake/nvm/bin" in read_login_environment("/bin/zsh", interactive=True)["PATH"]
+    assert "/fake/nvm/bin" not in read_login_environment("/bin/zsh")["PATH"]

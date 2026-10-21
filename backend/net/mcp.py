@@ -40,7 +40,9 @@ MAX_TOOLS_PER_SERVER = 40
 TOOLS_CACHE_SECONDS = 300
 CALL_TIMEOUT_SECONDS = 60
 CONNECT_TIMEOUT_SECONDS = 15
-START_TIMEOUT_SECONDS = 120
+START_TIMEOUT_SECONDS = 120  # Settings › Test: npx or uvx may first download the server
+RUN_START_TIMEOUT_SECONDS = 45
+STOP_TIMEOUT_SECONDS = 10
 FAILURE_RETRY_SECONDS = 120
 MAX_RESULT_CHARS = 20_000
 # Keys some JSON schemas carry that models' tool definitions do not accept.
@@ -138,6 +140,8 @@ def _reason(error: BaseException) -> str:
     """The innermost cause of an MCP failure, in words."""
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
+    if isinstance(error, MCPError):
+        return str(error)
     status = getattr(error, "status", None) or getattr(getattr(error, "response", None), "status_code", None)
     if status in (401, 403):
         return "the server refused the token"
@@ -206,20 +210,40 @@ class StdioConnection:
         self._log_path = log_path
         self._queue: asyncio.Queue[tuple[Any, asyncio.Future[Any]] | None] | None = None
         self._task: asyncio.Task[None] | None = None
+        self._ready = asyncio.Event()
 
     @property
     def running(self) -> bool:
         return self._queue is not None and self._task is not None and not self._task.done()
 
-    async def request(self, work: Any, timeout: float) -> Any:
+    async def request(self, work: Any, timeout: float, start_timeout: float | None = None) -> Any:
         if not self.running:
             queue: asyncio.Queue[tuple[Any, asyncio.Future[Any]] | None] = asyncio.Queue()
             self._queue = queue
-            self._task = asyncio.create_task(self._serve(queue))
+            self._ready = asyncio.Event()
+            self._task = asyncio.create_task(self._serve(queue, self._ready))
             self._task.add_done_callback(lambda task: self._fail_waiting(task, queue))
-        assert self._queue is not None
+        queue, task, ready = self._queue, self._task, self._ready
+        assert queue is not None and task is not None
+        if not ready.is_set():
+            # A server that never finishes starting (a proxy that drops traffic, a
+            # command waiting for input) is stopped, and the next request starts afresh.
+            waiter = asyncio.ensure_future(ready.wait())
+            limit = start_timeout if start_timeout is not None else timeout
+            done, _ = await asyncio.wait({waiter, task}, timeout=limit, return_when=asyncio.FIRST_COMPLETED)
+            waiter.cancel()
+            if not done:
+                if self._queue is queue:
+                    self._queue = None
+                task.cancel()
+                # Wait until the process has really ended (the SDK stops it in a few seconds).
+                await asyncio.wait({task}, timeout=STOP_TIMEOUT_SECONDS)
+                raise MCPError(f"the server did not start within {limit:.0f} s; its log is in ~/.config/agent-office/logs")
+            if task in done and not ready.is_set():
+                error = task.exception() if not task.cancelled() else None
+                raise error or MCPError("the server stopped")
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-        await self._queue.put((work, future))
+        await queue.put((work, future))
         return await asyncio.wait_for(future, timeout)
 
     @staticmethod
@@ -231,13 +255,15 @@ class StdioConnection:
             if item is not None and not item[1].done():
                 item[1].set_exception(error or MCPError("the server stopped"))
 
-    async def _serve(self, queue: asyncio.Queue[Any]) -> None:
+    async def _serve(self, queue: asyncio.Queue[Any], ready: asyncio.Event) -> None:
         from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, get_default_environment, stdio_client
 
         # Later wins: the safe basics, the app's defaults (company certificates),
         # the user's own login-shell settings, and what the user set for this server.
-        env = {**get_default_environment(), **self._base_env, **login_environment(), **self._env}
+        # Reading the shells runs them: not on the event loop, which serves the whole app.
+        login = await asyncio.to_thread(login_environment)
+        env = {**get_default_environment(), **self._base_env, **login, **self._env}
         params = StdioServerParameters(
             command=self.server.command, args=self.server.args, env=env,
             cwd=os.path.expanduser(self.server.cwd) if self.server.cwd else None,
@@ -250,6 +276,7 @@ class StdioConnection:
             async with stdio_client(params, errlog=errlog) as streams:
                 async with ClientSession(streams[0], streams[1]) as session:
                     await session.initialize()
+                    ready.set()
                     log.info("mcp server started", extra={"server": self.server.name})
                     while True:
                         item = await queue.get()
@@ -389,6 +416,7 @@ class MCPRegistry:
     async def _session(
         self, server: MCPServerConfig, token: str | None, work: Any,
         env: dict[str, str] | None = None, timeout: float = CALL_TIMEOUT_SECONDS,
+        start_timeout: float = START_TIMEOUT_SECONDS,
     ) -> Any:
         if server.transport == "stdio":
             connection = self._connections.get(server.name)
@@ -402,7 +430,7 @@ class MCPRegistry:
                 if env is None:
                     self._connections[server.name] = connection
             try:
-                return await connection.request(work, timeout)
+                return await connection.request(work, timeout, start_timeout)
             finally:
                 if env is not None:
                     await connection.close()
@@ -432,7 +460,8 @@ class MCPRegistry:
             raise
 
     async def list_tools(
-        self, server: MCPServerConfig, token: str | None, env: dict[str, str] | None = None
+        self, server: MCPServerConfig, token: str | None, env: dict[str, str] | None = None,
+        start_timeout: float = START_TIMEOUT_SECONDS,
     ) -> list[MCPTool]:
         async def work(session: Any) -> list[MCPTool]:
             listed = await session.list_tools()
@@ -443,9 +472,12 @@ class MCPRegistry:
             ]
 
         # A command server may first have to be downloaded (npx, uvx): give it longer.
-        wait = START_TIMEOUT_SECONDS if server.transport == "stdio" else CONNECT_TIMEOUT_SECONDS
+        wait = start_timeout + CONNECT_TIMEOUT_SECONDS if server.transport == "stdio" else CONNECT_TIMEOUT_SECONDS
         try:
-            return await asyncio.wait_for(self._session(server, token, work, env=env, timeout=wait), wait + 5)
+            return await asyncio.wait_for(
+                self._session(server, token, work, env=env, timeout=CONNECT_TIMEOUT_SECONDS, start_timeout=start_timeout),
+                wait + 5,
+            )
         except BaseException as exc:  # noqa: BLE001 - the SDK raises exception groups
             if isinstance(exc, asyncio.CancelledError):
                 raise
@@ -475,7 +507,8 @@ class MCPRegistry:
         if time.monotonic() - self._failed.get(name, -FAILURE_RETRY_SECONDS) < FAILURE_RETRY_SECONDS:
             return []
         try:
-            tools = await self.list_tools(server, self._keys.get(server.token_key))
+            # An agent waits for this before it starts: a shorter start than in Settings.
+            tools = await self.list_tools(server, self._keys.get(server.token_key), start_timeout=RUN_START_TIMEOUT_SECONDS)
         except MCPError as exc:
             log.warning("mcp server unavailable", extra={"server": name, "reason": str(exc)})
             self._failed[name] = time.monotonic()
