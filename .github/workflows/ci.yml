@@ -13,26 +13,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Tests and lint
+  tests:
+    name: Python tests
     runs-on: macos-15   # Apple Silicon, like the Macs the app runs on
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - run: uv sync --group app --group dev
+      - run: uv run pytest -q
+
+  lint:
+    name: Lint
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run ruff check backend guest tests scripts
+
+  ui:
+    name: UI
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Python tests
-        run: |
-          uv sync --group app --group dev
-          uv run pytest -q
-      - name: Lint
-        run: uv run ruff check backend guest tests scripts
-      - name: UI type check and build
+      - name: Type check and build
         working-directory: frontend
         run: |
           npm ci
@@ -42,7 +55,7 @@ jobs:
   build:
     name: Build the app
     runs-on: macos-15
-    needs: test
+    needs: [tests, lint, ui]
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6

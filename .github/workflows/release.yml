@@ -2,34 +2,87 @@ name: Release
 
 # Push a tag like v0.2.0 to publish a release with the app attached.
 # A tag with a suffix (v0.2.0-rc1) is published as a pre-release.
+#
+# One job per stage, so the run page shows where a release stands:
+#   Python tests · Lint · UI  →  Build & sign  →  Notarize  →  Publish  →  Verify download
+#
+# The in-app updater relies on the asset names, the VERSION file and the
+# signature (see AGENTS.md): keep them as they are.
 on:
   push:
     tags: ["v*"]
+  # A dry run from the Actions tab: everything up to Notarize, nothing published.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the dry run"
+        default: "v0.0.0-dry1"
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  # The tag being released (or the dry run's label).
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
-  release:
+  tests:
+    name: Python tests
     runs-on: macos-15
-    env:
-      # Signing is used when these repository secrets exist; without them the
-      # app is ad-hoc signed and macOS will warn when a downloaded copy is opened.
-      HAVE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
-      HAVE_NOTARY_KEY: ${{ secrets.NOTARY_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group app --group dev
+      - run: uv run pytest -q
+
+  lint:
+    name: Lint
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run ruff check backend guest tests scripts
+
+  ui:
+    name: UI
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Tests
+      - name: Type check and build
+        working-directory: frontend
         run: |
-          uv sync --group app --group dev
-          uv run pytest -q
+          npm ci
+          npx tsc --noEmit
+          npm run build
+
+  build:
+    name: Build & sign
+    runs-on: macos-15
+    needs: [tests, lint, ui]
+    env:
+      # Signing is used when these repository secrets exist; without them the
+      # app is ad-hoc signed and macOS will warn when a downloaded copy is opened.
+      HAVE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Import the signing certificate
         if: env.HAVE_CERTIFICATE == 'true'
@@ -53,42 +106,111 @@ jobs:
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           echo "SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
-      - name: Prepare the notarization key
-        if: env.HAVE_CERTIFICATE == 'true' && env.HAVE_NOTARY_KEY == 'true'
+      - name: Build and sign
+        run: |
+          VERSION="${TAG#v}"
+          # macOS wants a plain x.y.z; the full tag goes into the VERSION file.
+          # No NOTARY_* here: notarizing is the next job.
+          INSTALL_DIR= APP_VERSION="${VERSION%%-*}" APP_VERSION_LABEL="$TAG" scripts/build-app.sh
+
+      - name: Check the bundle
+        run: |
+          APP="dist/Agent Office.app"
+          RES="$APP/Contents/Resources"
+          [ "$(cat "$RES/app/VERSION")" = "$TAG" ] || { echo "::error::VERSION does not hold the tag"; exit 1; }
+          codesign --verify --strict "$APP"
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$RES/site-packages:$RES/app" "$RES/python/bin/python3.12" -c "import backend.main, backend.app, webview; print('starts')"
+
+      - name: Pack for the next job
+        # ditto keeps the signatures and extended attributes intact.
+        run: ditto -c -k --keepParent "dist/Agent Office.app" "$RUNNER_TEMP/signed-app.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-app
+          path: ${{ runner.temp }}/signed-app.zip
+          retention-days: 3
+
+      - name: Remove the signing keychain
+        if: always() && env.HAVE_CERTIFICATE == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
+  notarize:
+    name: Notarize
+    runs-on: macos-15
+    needs: build
+    env:
+      HAVE_NOTARY: ${{ secrets.MACOS_CERTIFICATE_P12 != '' && secrets.NOTARY_KEY_P8 != '' }}
+    outputs:
+      note: ${{ steps.note.outputs.note }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-app
+          path: ${{ runner.temp }}
+      - name: Unpack
+        run: |
+          mkdir -p dist
+          ditto -x -k "$RUNNER_TEMP/signed-app.zip" dist
+
+      - name: Notarize with Apple and staple
+        if: env.HAVE_NOTARY == 'true'
         env:
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
-        run: |
-          echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
-          echo "NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
-
-      - name: Build
-        env:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          # macOS wants a plain x.y.z; the full tag stays in the file name.
-          INSTALL_DIR= APP_VERSION="${VERSION%%-*}" APP_VERSION_LABEL="$GITHUB_REF_NAME" scripts/build-app.sh
-          cd dist
-          ditto -c -k --keepParent "Agent Office.app" "Agent-Office-$VERSION-macos-arm64.zip"
-          shasum -a 256 "Agent-Office-$VERSION-macos-arm64.zip" > "Agent-Office-$VERSION-macos-arm64.zip.sha256"
-          cat "Agent-Office-$VERSION-macos-arm64.zip.sha256"
+          echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8" scripts/notarize.sh "dist/Agent Office.app"
+          rm -f "$RUNNER_TEMP/notary.p8"
 
       - name: Describe how it was signed
-        id: signing
+        id: note
+        env:
+          HAVE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
         run: |
-          if [ -n "${NOTARY_KEY_PATH:-}" ]; then
+          if [ "$HAVE_NOTARY" = true ]; then
             echo "note=Signed with a Developer ID and notarized by Apple: open it like any other app." >> "$GITHUB_OUTPUT"
-          elif [ -n "${SIGN_IDENTITY:-}" ]; then
+          elif [ "$HAVE_CERTIFICATE" = true ]; then
             echo "note=Signed with a Developer ID but **not notarized**: macOS will warn on first open (right-click the app and choose Open)." >> "$GITHUB_OUTPUT"
           else
             echo "note=**Not signed with a Developer ID.** macOS will refuse to open a downloaded copy. Either build it yourself with \`scripts/build-app.sh\`, or after unzipping run \`xattr -dr com.apple.quarantine \"Agent Office.app\"\`." >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish the release
+      - name: Zip the release asset
+        run: |
+          VERSION="${TAG#v}"
+          cd dist
+          ditto -c -k --keepParent "Agent Office.app" "Agent-Office-$VERSION-macos-arm64.zip"
+          shasum -a 256 "Agent-Office-$VERSION-macos-arm64.zip" > "Agent-Office-$VERSION-macos-arm64.zip.sha256"
+          cat "Agent-Office-$VERSION-macos-arm64.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-asset
+          path: |
+            dist/Agent-Office-*.zip
+            dist/Agent-Office-*.sha256
+          retention-days: 3
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: notarize
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-asset
+          path: dist
+      - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNING_NOTE: ${{ steps.signing.outputs.note }}
+          GH_REPO: ${{ github.repository }}
+          SIGNING_NOTE: ${{ needs.notarize.outputs.note }}
         run: |
           PRERELEASE=""
           case "$GITHUB_REF_NAME" in *-*) PRERELEASE="--prerelease" ;; esac
@@ -100,9 +222,27 @@ jobs:
             echo "$SIGNING_NOTE"
           } > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" dist/Agent-Office-*.zip dist/Agent-Office-*.sha256 \
-            --title "Agent Office ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag --title "Agent Office ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" \
             --generate-notes $PRERELEASE
 
-      - name: Remove the signing keychain
-        if: always() && env.HAVE_CERTIFICATE == 'true'
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+  verify:
+    name: Verify download
+    runs-on: macos-15
+    needs: publish
+    if: github.event_name == 'push'
+    steps:
+      - name: Download as a user would, and check it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HAVE_NOTARY: ${{ secrets.MACOS_CERTIFICATE_P12 != '' && secrets.NOTARY_KEY_P8 != '' }}
+        run: |
+          cd "$RUNNER_TEMP"
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p 'Agent-Office-*'
+          shasum -a 256 -c Agent-Office-*.sha256
+          ditto -x -k Agent-Office-*.zip .
+          [ "$(cat "Agent Office.app/Contents/Resources/app/VERSION")" = "$GITHUB_REF_NAME" ]
+          if [ "$HAVE_NOTARY" = true ]; then
+            spctl --assess --type execute -vv "Agent Office.app" 2>&1 | tee assess.txt
+            grep -q "Notarized Developer ID" assess.txt
+          fi
+          echo "Checksum, version and signature are as the updater expects."

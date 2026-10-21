@@ -42,20 +42,4 @@ if [ -z "${NOTARY_KEY_PATH:-}" ]; then
   echo "==> Not notarized (no NOTARY_KEY_PATH given)"
   exit 0
 fi
-: "${NOTARY_KEY_ID:?set NOTARY_KEY_ID}" "${NOTARY_ISSUER_ID:?set NOTARY_ISSUER_ID}"
-
-echo "==> Notarizing (this takes a few minutes)"
-UPLOAD="$(mktemp -d)/upload.zip"
-ditto -c -k --keepParent "$APP" "$UPLOAD"
-xcrun notarytool submit "$UPLOAD" --wait \
-  --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
-rm -f "$UPLOAD"
-# Fetching the ticket from Apple occasionally drops the connection: try again.
-for attempt in 1 2 3 4 5; do
-  xcrun stapler staple "$APP" && break
-  [ "$attempt" = 5 ] && { echo "error: stapling failed" >&2; exit 1; }
-  echo "    stapling failed; trying again in $((attempt * 15))s"
-  sleep $((attempt * 15))
-done
-spctl --assess --type execute --verbose=2 "$APP" 2>&1 | tail -2
-echo "==> Signed and notarized"
+"$(dirname "$0")/notarize.sh" "$APP"

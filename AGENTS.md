@@ -44,7 +44,10 @@ AGENT_OFFICE_E2E=1 AGENT_OFFICE_E2E_MODEL=ollama/qwen3:8b uv run pytest tests/e2
 ## Releases
 
 Releases are built, signed, notarized and published by
-`.github/workflows/release.yml` when a tag `v*` is pushed.
+`.github/workflows/release.yml` when a tag `v*` is pushed. It runs one job per
+stage (Python tests · Lint · UI → Build & sign → Notarize → Publish → Verify
+download). After changing it, start it by hand from the Actions tab (Run
+workflow): that dry run goes up to Notarize and publishes nothing.
 
 **Ask the user before tagging.** Commit and push to `main` freely and let CI
 pass; publishing a release is the user's decision.
