@@ -1,30 +1,77 @@
 # Agent Office
 
-AI coworkers on your Mac. Each agent has its own persistent Linux computer (a
-QEMU/HVF virtual machine with a desktop, Chrome, a shell and files), a model of
-your choice, and a seat in shared channels where agents and you talk to each
-other. Everything runs locally; model requests go only to the provider you pick.
+[![Release](https://img.shields.io/github/v/release/josuablejeru/agent-office)](https://github.com/josuablejeru/agent-office/releases/latest)
+[![CI](https://github.com/josuablejeru/agent-office/actions/workflows/ci.yml/badge.svg)](https://github.com/josuablejeru/agent-office/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+![macOS on Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-black)
 
-## Status
+**AI coworkers on your Mac.** Hire an agent, give it a task, and it gets to
+work on **its own computer**: a Linux desktop with Chrome, a shell and files
+that it keeps between tasks. You pick the model, local or hosted. You see
+every step it takes, approve the risky ones, and can take over its mouse and
+keyboard at any time. Everything runs on your Mac.
 
-| Area | State |
-| --- | --- |
-| Agents with their own persistent computer (Debian desktop, Chrome) | working |
-| Tools: web search, browser (Playwright), shell, files, screenshots | working |
-| Shared folder for handing files to an agent and collecting results | working |
-| Long-term memory (facts with links, recalled automatically) and SQLite databases per agent | working |
-| Chat, run limits, stop button, conversation clearing | working |
-| Safety rules with approval dialog (allow once / reject) | working |
-| Permissions per agent: allowed, ask first or not allowed for each kind of tool | working |
-| Sight: screenshots to the model, clicking and typing by position (per agent, off by default) | working; checked with a scripted model and a small local model |
-| Split DNS, so agents resolve VPN-internal names like the Mac does | working with a stand-in server; not tried on a real VPN |
-| Shared channels, `@mention` hand-offs between agents | working |
-| Characters with drawn avatars, or a photo of your own | working |
-| Desktop view (noVNC) with take control / return control | working |
-| Providers: any OpenAI-compatible server (Ollama, LM Studio, vLLM, xAI, OpenRouter...) | verified with a local Ollama |
-| Providers: OpenAI, Anthropic, Google Vertex AI (Gemini and Claude) | implemented and unit-tested; not called live |
-| Jev decision provider | adapter against an assumed HTTP contract; not verified against a real Jev |
-| macOS app with bundled Python, Keychain key storage, in-app setup | working |
+![An agent turning meeting notes into action items and opening a web page](docs/screenshots/chat.png)
+
+## What your coworkers can do
+
+### Work on a computer of their own
+
+Each agent has a persistent virtual machine with a desktop, Chrome, a shell
+and a `Shared` folder for handing files back and forth. They search the web,
+browse, run commands, read and write files, and remember what you tell them
+across conversations. **Open computer** shows their screen live; **Take
+control** hands you the mouse and keyboard for a login or a CAPTCHA.
+
+![An agent's desktop next to the conversation](docs/screenshots/computer.png)
+
+### Work together
+
+Agents and you share channels. Mention someone with `@name` and they pick the
+task up, post the result, and hand work on to a colleague.
+
+![Two agents handing off work in #general](docs/screenshots/channel.png)
+
+### Stay in your control
+
+Destructive actions stop and wait for you. Per agent, you decide what it may
+do: allowed, ask me first, or not allowed, for commands, files, the browser,
+web search, databases, memory and channels. Built-in safety rules apply
+whatever you choose.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/approval.png" alt="An approval request for a recursive delete"></td>
+    <td><img src="docs/screenshots/permissions.png" alt="An agent's Permissions tab"></td>
+  </tr>
+</table>
+
+### Fit into a company network
+
+Agents resolve names the way your Mac does, including VPN split DNS, and trust
+your company's root certificates. pip and npm can go through a JFrog
+Artifactory, and agents' computers can be built on a hardened base image from
+it. Vertex AI works with your existing `gcloud` sign-in.
+
+![Settings, Package repository](docs/screenshots/settings.png)
+
+### Use any model
+
+Ollama, LM Studio and any other OpenAI-compatible server, on this Mac or your
+network; OpenAI, Anthropic, and Gemini or Claude on Google Vertex AI. Models
+that read images can also **see** the browser and click by position, when you
+allow it.
+
+<sub>Screenshots from a demo session with a scripted model.</sub>
+
+## Quick start
+
+1. Install QEMU (`brew install qemu`) and download Agent Office from
+   [Releases](https://github.com/josuablejeru/agent-office/releases/latest).
+2. Open it and press **Build now** once: it prepares the system image agents'
+   computers start from (about a minute on a fast connection).
+3. **New agent**: pick a character, a model and a job description, turn its
+   computer on, and give it a task.
 
 ## Install
 
@@ -409,6 +456,29 @@ otherwise:
 Set each with `gh secret set NAME`. To sign a local build the same way:
 `SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh`
 (see `scripts/sign-and-notarize.sh`).
+
+## Status
+
+| Area | State |
+| --- | --- |
+| Agents with their own persistent computer (Debian desktop, Chrome) | working |
+| Tools: web search, browser (Playwright), shell, files, screenshots | working |
+| Shared folder for handing files to an agent and collecting results | working |
+| Long-term memory (facts with links, recalled automatically) and SQLite databases per agent | working |
+| Chat, run limits, stop button, conversation clearing | working |
+| Safety rules with approval dialog (allow once / reject) | working |
+| Permissions per agent: allowed, ask first or not allowed for each kind of tool | working |
+| Split DNS, so agents resolve VPN-internal names like the Mac does | working with a stand-in server; not tried on a real VPN |
+| Company root certificates, JFrog Artifactory for pip/npm, hardened base images from Artifactory | working with stand-ins for the company services |
+| Sight: the agent looks at the browser when it chooses to, and clicks by position | working; small local vision models are imprecise about positions |
+| Shared channels, `@mention` hand-offs between agents | working |
+| Characters with drawn avatars, or a photo of your own | working |
+| Desktop view (noVNC) with take control / return control | working |
+| Providers: any OpenAI-compatible server (Ollama, LM Studio, vLLM, xAI, OpenRouter...) | verified with a local Ollama |
+| Providers: Claude on Google Vertex AI | used at work (region `eu`) |
+| Providers: OpenAI, Anthropic, Gemini on Vertex AI | implemented and unit-tested; not called live |
+| Jev decision provider | adapter against an assumed HTTP contract; not verified against a real Jev |
+| macOS app with bundled Python, Keychain key storage, in-app setup | working |
 
 ## Tests
 
