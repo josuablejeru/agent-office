@@ -254,8 +254,8 @@ Settings shows the internal domains currently in effect.
   supported yet.
 - **Company package repository (JFrog Artifactory).** Where pip and npm must
   go through Artifactory, enter its address (up to `/artifactory`), your
-  username, a token and the repository names under Settings › Network ›
-  Package repository, and press Test. Agents' computers then use it for `pip`
+  username, a token and the repository names under Settings › Package
+  repository, and press Test. Agents' computers then use it for `pip`
   and `npm` from their next start, and the system image build fetches the
   agent software's Python packages through it. The token is kept in the
   macOS Keychain, never in `config.yaml`, and is not left in the system
@@ -264,8 +264,8 @@ Settings shows the internal domains currently in effect.
   `packages.artifactory`.
 - **A company base image.** Where agents' computers must start from a
   company-approved (hardened) image, put its path in Artifactory
-  (`repository/path/image.qcow2`) under Settings › Network › Package
-  repository › Base image. The next system image build downloads it with the
+  (`repository/path/image.qcow2`) under Settings › Package repository ›
+  Base image. The next system image build downloads it with the
   same Artifactory login, checks it against the SHA-256 Artifactory records for
   it (and refuses it if there is none, or if it does not match), and installs
   the desktop, Chrome and the agent software on top. The image must be built

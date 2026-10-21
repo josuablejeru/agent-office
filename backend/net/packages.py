@@ -174,7 +174,7 @@ class PackageSource:
         if current is None:
             repository = load(self._settings)
             if repository and repository.base_image:
-                raise ImageError("The Artifactory token is missing: enter it under Settings › Network.")
+                raise ImageError("The Artifactory token is missing: enter it under Settings › Package repository.")
             return None
         repository, token = current
         if not repository.base_image:
