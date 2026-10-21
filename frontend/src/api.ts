@@ -8,6 +8,8 @@ import type {
   MemoryView,
   PackageRepository,
   PackageRepositoryUpdate,
+  McpServer,
+  McpServerForm,
   PermissionsInfo,
   UpdateStatus,
   ModelCheck,
@@ -145,6 +147,13 @@ export const api = {
     request<{ text: string }>("/api/assist/job-description", post(payload)),
   drawAvatars: (payload: { provider: string; model: string; description: string; count: number }) =>
     request<{ candidates: string[] }>("/api/assist/avatar", post(payload)),
+  listMcpServers: () => request<McpServer[]>("/api/mcp/servers"),
+  saveMcpServer: (form: McpServerForm) =>
+    request<McpServer>(`/api/mcp/servers/${encodeURIComponent(form.name)}`, { method: "PUT", body: JSON.stringify(form) }),
+  removeMcpServer: (name: string) =>
+    request<void>(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  testMcpServer: (form: McpServerForm) =>
+    request<{ ok: boolean; detail: string; tools: string[] }>("/api/mcp/servers/test", post(form)),
   version: () => request<{ version: string; release: boolean }>("/api/system/version"),
   updateStatus: () => request<UpdateStatus>("/api/system/update"),
   checkForUpdate: () => request<UpdateStatus>("/api/system/update/check", post()),

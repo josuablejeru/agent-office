@@ -24,6 +24,7 @@ from backend.api import channels as channels_api
 from backend.api import chat as chat_api
 from backend.api import desktop as desktop_api
 from backend.api import files as files_api
+from backend.api import mcp as mcp_api
 from backend.api import memory as memory_api
 from backend.api import vm as vm_api
 from backend.api.deps import require_api_token
@@ -35,6 +36,7 @@ from backend.keystore import KeyStore
 from backend.logging_config import configure_logging, get_logger
 from backend.net.certificates import CertificateSource
 from backend.net.dns import DnsForwarder
+from backend.net.mcp import MCPRegistry
 from backend.net.packages import PackageSource
 from backend.policy.approvals import ApprovalBroker
 from backend.policy.setup import build_policy_engine
@@ -179,6 +181,9 @@ def create_app(
         return None
 
     app.state.updater = Updater(settings, busy=busy)
+    # MCP servers: tokens in the Keychain, the app as the client.
+    app.state.mcp = MCPRegistry(settings, key_store)
+    app.state.run_service.mcp = app.state.mcp
 
     protected = [Depends(require_api_token)]
     app.include_router(agents_api.router, dependencies=protected)
@@ -188,6 +193,7 @@ def create_app(
     app.include_router(files_api.router, dependencies=protected)
     app.include_router(memory_api.router, dependencies=protected)
     app.include_router(assist_api.router, dependencies=protected)
+    app.include_router(mcp_api.router, dependencies=protected)
     # Checks the token itself: its WebSocket route cannot use header auth.
     app.include_router(desktop_api.router)
 

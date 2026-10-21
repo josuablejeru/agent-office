@@ -18,6 +18,9 @@ from backend.policy.permissions import GROUP_KEYS, group_of, permissions_of, sto
 from backend.providers.base import DecisionProvider, DecisionResult, ModelResponse
 from tests.test_runs import ScriptedProvider, call, make_service
 
+# Never chosen: everything allowed, except tools from MCP servers, which ask first.
+DEFAULTS = {**dict.fromkeys(GROUP_KEYS, "allow"), "mcp": "ask"}
+
 ALLOW, ASK, REJECT = PolicyAction.ALLOW, PolicyAction.REQUIRE_APPROVAL, PolicyAction.REJECT
 
 SAFE = ("shell.exec", {"command": "ls -la"})                 # a rule says: read-only, allow
@@ -110,11 +113,11 @@ def test_agents_from_before_levels_keep_exactly_what_they_had(tmp_path: Path) ->
     init_db(engine)
     with Session(engine) as session:
         agents = {agent.name: agent for agent in session.exec(select(Agent)).all()}
-        assert set(permissions_of(agents["everything"]).values()) == {"allow"}
+        assert permissions_of(agents["everything"]) == DEFAULTS
         assert agents["everything"].unknown_action == "default"
-        assert permissions_of(agents["no-shell"]) == {**dict.fromkeys(GROUP_KEYS, "allow"), "shell": "off"}
+        assert permissions_of(agents["no-shell"]) == {**DEFAULTS, "shell": "off"}
         assert permissions_of(agents["no-browser"]) == {
-            **dict.fromkeys(GROUP_KEYS, "allow"), "browser": "off", "search": "off"}
+            **DEFAULTS, "browser": "off", "search": "off"}
 
 
 def set_levels(engine: Any, agent_id: int, **levels: Any) -> None:
@@ -219,11 +222,11 @@ def test_the_settings_page_can_read_and_change_an_agents_permissions(client: Any
     assert described["app_default"] == "allow" and len(described["always_asks"]) >= 5
 
     created = client.post("/api/agents", json={"name": "pam", "provider": "ollama", "model": "m"}).json()
-    assert set(created["permissions"].values()) == {"allow"} and created["unknown_action"] == "default"
+    assert created["permissions"] == DEFAULTS and created["unknown_action"] == "default"
 
     changed = client.patch(f"/api/agents/{created['id']}", json={
         "permissions": {"shell": "ask", "channels": "off"}, "unknown_action": "ask"}).json()
-    assert changed["permissions"] == {**dict.fromkeys(GROUP_KEYS, "allow"), "shell": "ask", "channels": "off"}
+    assert changed["permissions"] == {**DEFAULTS, "shell": "ask", "channels": "off"}
     assert changed["unknown_action"] == "ask" and changed["perm_shell"] is True
 
     # Changing something else leaves them alone; an old-style switch still works.
@@ -300,3 +303,18 @@ def test_a_mention_does_not_reach_an_agent_whose_channels_are_off(tmp_path: Path
     ]
     with Session(world.engine) as session:
         assert [run.agent_id for run in session.exec(select(Run)).all()] == [2]
+
+
+def test_every_permission_level_can_be_saved_as_the_form_sends_them(client: Any) -> None:
+    """The form sends all groups at once; each one the page shows must be accepted."""
+    described = client.get("/api/agents/permissions").json()["groups"]
+    created = client.post("/api/agents", json={"name": "sam", "provider": "ollama", "model": "m"}).json()
+    every = {group["key"]: "ask" for group in described}
+    saved = client.patch(f"/api/agents/{created['id']}", json={"permissions": every})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["permissions"] == every
+    from typing import get_args
+
+    from backend.agents.models import Group
+
+    assert set(get_args(Group)) == set(GROUP_KEYS)  # the two lists cannot drift apart again

@@ -15,6 +15,7 @@ dependencies = [
     "truststore>=0.10",
     "cryptography>=43",
     "defusedxml>=0.7",
+    "mcp>=1.20",
 ]
 
 [dependency-groups]

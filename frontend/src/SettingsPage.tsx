@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { McpServers } from "./McpServers";
 import { ModelTest } from "./ModelTest";
 import { PackageRepositorySettings } from "./PackageRepository";
 import type { AppSettings, DnsStatus, Provider, UpdateStatus } from "./types";
 
-export type SettingsSection = "general" | "network" | "packages" | "models";
+export type SettingsSection = "general" | "network" | "packages" | "models" | "mcp";
 
 export const SETTINGS_SECTIONS: [SettingsSection, string][] = [
   ["general", "General"],
   ["network", "Network"],
   ["packages", "Package repository"],
   ["models", "Model providers"],
+  ["mcp", "MCP servers"],
 ];
 
 interface Props {
@@ -389,6 +391,12 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
         <h3>Package repository (JFrog Artifactory)</h3>
         <PackageRepositorySettings />
 
+          </>
+        )}
+        {section === "mcp" && (
+          <>
+            <h3>MCP servers</h3>
+            <McpServers />
           </>
         )}
         {section === "models" && (

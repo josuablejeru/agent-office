@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from sqlmodel import Field, SQLModel
@@ -34,6 +35,8 @@ class Agent(SQLModel, table=True):
     unknown_action: str = "default"
     # The model is shown screenshots of the browser (and may click by position).
     vision_enabled: bool = False
+    # Names of the MCP servers (Settings › MCP servers) this agent may use, as a JSON list.
+    mcp_servers_json: str = ""
     vm_image: str = "debian-desktop"
     vm_memory_mb: int = 4096
     vm_cpus: int = 4
@@ -42,6 +45,14 @@ class Agent(SQLModel, table=True):
     # Assigned on first VM start and kept so the agent's endpoint stays stable.
     vm_daemon_port: int | None = None
     created_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def mcp_servers(self) -> list[str]:
+        try:
+            names = json.loads(self.mcp_servers_json or "[]")
+        except ValueError:
+            return []
+        return [str(name) for name in names] if isinstance(names, list) else []
 
     @property
     def permissions(self) -> dict[str, str]:

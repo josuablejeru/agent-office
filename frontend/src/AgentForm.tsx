@@ -67,6 +67,7 @@ export function AgentForm({
     permissions: agent?.permissions ?? {},
     unknown_action: agent?.unknown_action ?? "default",
     vision_enabled: agent?.vision_enabled ?? false,
+    mcp_servers: agent?.mcp_servers ?? [],
     vm_memory_mb: agent?.vm_memory_mb ?? 4096,
     vm_cpus: agent?.vm_cpus ?? 4,
   });
@@ -215,6 +216,8 @@ export function AgentForm({
             onJev={(enabled) => set("jev_enabled", enabled)}
             visionEnabled={form.vision_enabled}
             onVision={(enabled) => set("vision_enabled", enabled)}
+            mcpServers={form.mcp_servers}
+            onMcpServers={(names) => set("mcp_servers", names)}
           />
         )}
 

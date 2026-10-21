@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { McpServerChoice } from "./McpServers";
 import type { Level, PermissionsInfo, UnknownAction } from "./types";
 
 const LEVELS: [Level, string][] = [
@@ -17,6 +18,8 @@ interface Props {
   onJev: (enabled: boolean) => void;
   visionEnabled: boolean;
   onVision: (enabled: boolean) => void;
+  mcpServers: string[];
+  onMcpServers: (names: string[]) => void;
 }
 
 /** What one agent may do: a level per kind of tool, on top of the built-in safety rules. */
@@ -29,6 +32,8 @@ export function Permissions({
   onJev,
   visionEnabled,
   onVision,
+  mcpServers,
+  onMcpServers,
 }: Props) {
   const [info, setInfo] = useState<PermissionsInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +100,8 @@ export function Permissions({
           <option value="ask">Ask me first</option>
         </select>
       </div>
+
+      <McpServerChoice chosen={mcpServers} onChange={onMcpServers} />
 
       <div className="vision-setting">
         <label className="toggle">

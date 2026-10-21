@@ -26,7 +26,11 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     ("databases", "Databases", "Create and change its own tables of data."),
     ("memory", "Memory", "Remember facts between conversations. Only when allowed is it recalled at the start of a task."),
     ("channels", "Channels", "Read and post in channels. When not allowed, @mentions do not reach it."),
+    ("mcp", "MCP tools", "Use tools of the MCP servers ticked below (set up under Settings › MCP servers)."),
 )
+# What a group is when the user never chose: everything is allowed, except tools from
+# outside services, which ask first.
+DEFAULT_LEVELS: dict[str, str] = {"mcp": "ask"}
 GROUP_KEYS = tuple(key for key, _, _ in GROUPS)
 GROUP_NAMES = {key: name for key, name, _ in GROUPS}
 
@@ -51,7 +55,7 @@ def group_of(operation: str) -> str | None:
         return "search"
     prefix = operation.split(".", 1)[0].split("_", 1)[0]
     return {"shell": "shell", "file": "files", "browser": "browser", "memory": "memory",
-            "channel": "channels", "web": "search", "db": "databases"}.get(prefix)
+            "channel": "channels", "web": "search", "db": "databases", "mcp": "mcp"}.get(prefix)
 
 
 def permissions_of(agent: Agent) -> dict[str, Level]:
@@ -70,7 +74,7 @@ def permissions_of(agent: Agent) -> dict[str, Level]:
         else:
             # Never chosen: what the old on/off switch said, or allowed.
             switch = LEGACY_SWITCHES.get(key)
-            levels[key] = "off" if switch and not getattr(agent, switch) else "allow"
+            levels[key] = "off" if switch and not getattr(agent, switch) else DEFAULT_LEVELS.get(key, "allow")  # type: ignore[assignment]
     return levels
 
 

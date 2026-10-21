@@ -1591,3 +1591,24 @@ textarea:focus {
   height: 96px;
   border-radius: 50%;
 }
+
+/* MCP servers */
+
+.mcp-servers,
+.mcp-form,
+.mcp-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mcp-form {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.mcp-choice {
+  gap: 6px;
+  padding-left: 4px;
+}

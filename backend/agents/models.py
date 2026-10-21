@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.policy.permissions import Level, UnknownAction
 
-Group = Literal["shell", "files", "browser", "search", "databases", "memory", "channels"]
+Group = Literal["shell", "files", "browser", "search", "databases", "memory", "channels", "mcp"]
 
 # The name doubles as the agent's directory name, so it must be a safe slug.
 AGENT_NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,62}$"
@@ -34,6 +34,7 @@ class AgentCreate(BaseModel):
     permissions: dict[Group, Level] | None = None
     unknown_action: UnknownAction = "default"
     vision_enabled: bool = False
+    mcp_servers: list[str] = Field(default_factory=list, max_length=20)
     vm_image: str = Field(default="debian-desktop", pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     vm_memory_mb: int = Field(default=4096, ge=512, le=65536)
     vm_cpus: int = Field(default=4, ge=1, le=32)
@@ -55,6 +56,7 @@ class AgentUpdate(BaseModel):
     permissions: dict[Group, Level] | None = None
     unknown_action: UnknownAction | None = None
     vision_enabled: bool | None = None
+    mcp_servers: list[str] | None = Field(default=None, max_length=20)
     vm_memory_mb: int | None = Field(default=None, ge=512, le=65536)
     vm_cpus: int | None = Field(default=None, ge=1, le=32)
 
@@ -78,6 +80,7 @@ class AgentRead(BaseModel):
     permissions: dict[str, str] = {}
     unknown_action: str = "default"
     vision_enabled: bool = False
+    mcp_servers: list[str] = []
     vm_image: str
     vm_memory_mb: int
     vm_cpus: int

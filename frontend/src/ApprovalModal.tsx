@@ -6,6 +6,11 @@ const CONTENT_PREVIEW_CHARS = 2000;
 
 /** Everything the user needs to judge the action: for a file write, that includes the content. */
 function describe(approval: PendingApproval): string {
+  if (approval.tool.startsWith("mcp.")) {
+    // A tool of an MCP server: which one, and exactly what it is sent.
+    const [, server, tool] = approval.tool.split(".");
+    return `${server} › ${tool}\n\n${JSON.stringify(approval.arguments, null, 2)}`;
+  }
   const { command, path, url, content } = approval.arguments;
   if (typeof command === "string") return command;
   if (typeof path === "string" && typeof content === "string") {

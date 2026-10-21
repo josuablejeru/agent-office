@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -83,7 +84,8 @@ class AgentManager:
 
         fields = payload.model_dump()
         levels = fields.pop("permissions") or {}
-        agent = Agent(**fields, vm_disk_path=str(agent_dir / "disk.qcow2"))
+        servers = fields.pop("mcp_servers") or []
+        agent = Agent(**fields, vm_disk_path=str(agent_dir / "disk.qcow2"), mcp_servers_json=json.dumps(servers))
         store_permissions(agent, levels)
         (agent_dir / "logs").mkdir(parents=True)
         self._session.add(agent)
@@ -97,6 +99,9 @@ class AgentManager:
         agent = self.get(agent_id)
         changes = payload.model_dump(exclude_unset=True)
         levels = changes.pop("permissions", None) or {}
+        servers = changes.pop("mcp_servers", None)
+        if servers is not None:
+            agent.mcp_servers_json = json.dumps(sorted(set(servers)))
         for optional in ("unknown_action", "vision_enabled"):
             if optional in changes and changes[optional] is None:
                 del changes[optional]

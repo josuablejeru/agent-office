@@ -25,6 +25,7 @@ export interface Agent {
   permissions: Record<string, Level>;
   unknown_action: UnknownAction;
   vision_enabled: boolean;
+  mcp_servers: string[];
   vm_memory_mb: number;
   vm_cpus: number;
   vm_status: VmStatus;
@@ -43,6 +44,7 @@ export interface AgentCreate {
   permissions: Record<string, Level>;
   unknown_action: UnknownAction;
   vision_enabled: boolean;
+  mcp_servers: string[];
   vm_memory_mb: number;
   vm_cpus: number;
 }
@@ -181,6 +183,22 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
   decision: string | null;
   result: Record<string, unknown> | null;
+}
+
+export interface McpServer {
+  name: string;
+  url: string;
+  auth_header: string;
+  description: string;
+  has_token: boolean;
+}
+
+export interface McpServerForm {
+  name: string;
+  url: string;
+  auth_header: string;
+  description: string;
+  token: string;
 }
 
 export interface PendingApproval {

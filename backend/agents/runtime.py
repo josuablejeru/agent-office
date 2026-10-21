@@ -19,16 +19,24 @@ from backend.agents.channels import (
     mentions,
 )
 from backend.agents.loop import LoopResult, Outcome, RunLimits, StopReason, run_agent_loop
-from backend.agents.tools import ENVIRONMENT_NOTE, VISION_NOTE, GuestToolExecutor, HostHandler, tools_for
+from backend.agents.tools import (
+    ENVIRONMENT_NOTE,
+    VISION_NOTE,
+    AgentTool,
+    GuestToolExecutor,
+    HostHandler,
+    tools_for,
+)
 from backend.config import ProviderSettings, Settings
 from backend.db.models import Agent, Approval, ChannelMessage, Message, Run, ToolCall, utcnow
 from backend.logging_config import get_logger
+from backend.net.mcp import tool_name as mcp_tool_name
 from backend.notify import Notifier
 from backend.policy.actions import PolicyAction, PolicyDecision
 from backend.policy.approvals import ApprovalBroker
 from backend.policy.engine import PolicyEngine
 from backend.policy.permissions import group_of, permissions_of, unknown_action_of
-from backend.providers.base import ChatMessage, ModelProvider, ProviderError, ToolCallRequest
+from backend.providers.base import ChatMessage, ModelProvider, ProviderError, ToolCallRequest, ToolSpec
 from backend.providers.registry import FallbackProvider, build_provider
 from backend.vm.errors import VMError
 from backend.vm.guest import GuestClient
@@ -149,6 +157,8 @@ class RunService:
         notifier: Notifier | None = None,
     ) -> None:
         self.notifier = notifier or Notifier()
+        # The MCP server registry, set by the app; agents use the servers ticked for them.
+        self.mcp: Any = None
         # Agents currently paused for the user's approval.
         self._waiting: set[int] = set()
         self._channels = channels or ChannelService(engine)
@@ -286,6 +296,31 @@ class RunService:
                 )
                 self.start(agent.id, task, channel_id=message.channel_id, hops=hops + 1)
                 log.info("agent woken by mention", extra={"agent": name, "channel": channel.name, "hops": hops})
+
+    async def _mcp_tools(self, agent: Agent) -> tuple[list[AgentTool], dict[str, HostHandler]]:
+        """The tools of the MCP servers this agent may use, and how to call them."""
+        if self.mcp is None or not agent.mcp_servers or permissions_of(agent)["mcp"] == "off":
+            return [], {}
+        tools: list[AgentTool] = []
+        handlers: dict[str, HostHandler] = {}
+        for server in agent.mcp_servers:
+            for tool in await self.mcp.tools(server):
+                operation = f"mcp.{server}.{tool.name}"
+                tools.append(AgentTool(
+                    operation=operation,
+                    permission="mcp",
+                    spec=ToolSpec(
+                        name=mcp_tool_name(server, tool.name),
+                        description=f"[{server}] {tool.description}".strip()[:1000],
+                        parameters=tool.input_schema or {"type": "object", "properties": {}},
+                    ),
+                ))
+
+                async def call(args: dict[str, Any], server: str = server, name: str = tool.name) -> dict[str, Any]:
+                    return await self.mcp.call(server, name, args)
+
+                handlers[operation] = call
+        return tools, handlers
 
     async def _offer_to_everyone(self, message: ChannelMessage, agents: dict[str, Agent]) -> None:
         """A message to nobody in particular: agents who are around take turns, until one answers.
@@ -482,6 +517,8 @@ class RunService:
                 if agent.vm_daemon_port is None:
                     raise VMError("The agent's VM has not been started.")
                 tools = tools_for(agent)
+                mcp_tools, mcp_handlers = await self._mcp_tools(agent)
+                tools += mcp_tools
                 client = self._client_factory(agent.vm_daemon_port, self._vm_manager.guest_secret(agent))
                 # Recall happens before the first tool call, so the Memory setting is
                 # applied here: only an agent that may use its memory freely gets it.
@@ -492,7 +529,7 @@ class RunService:
                     client,
                     tools,
                     self._settings.screenshots_dir(agent.name),
-                    self._channel_handlers(agent, run.hops, run_id),
+                    {**self._channel_handlers(agent, run.hops, run_id), **mcp_handlers},
                     vision=agent.vision_enabled,
                 )
                 result = await run_agent_loop(

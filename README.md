@@ -55,6 +55,12 @@ it. Vertex AI works with your existing `gcloud` sign-in.
 
 ![Settings, Package repository](docs/screenshots/settings.png)
 
+### Extend them with MCP
+
+Set up your company's MCP servers (tickets, wiki, CRM…) once, in one place,
+and choose per agent which ones it may use. Their tools go through the same
+approvals; the tokens stay in your Keychain.
+
 ### Use any model
 
 Ollama, LM Studio and any other OpenAI-compatible server, on this Mac or your
@@ -190,6 +196,12 @@ found again on the next start.
    A chain of hand-offs stops after three steps so agents cannot keep each
    other busy indefinitely. An agent needs its computer on to respond, and
    Channels must not be switched off in its permissions.
+
+9. **MCP servers.** Set up remote MCP servers once under Settings › MCP
+   servers (address, token, Test), then tick them on an agent's Permissions
+   tab. Their tools ask for your approval unless you allow them. The app is the
+   MCP client, so tokens stay in your Keychain and never reach an agent's
+   computer. Only servers reachable over HTTP; see `docs/specs/mcp.md`.
 
 ### Characters and photos
 
