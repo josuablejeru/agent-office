@@ -166,7 +166,11 @@ found again on the next start.
 7. **Open computer.** Watch the agent's desktop. **Take control** gives you
    mouse and keyboard and pauses the agent, for logins, 2FA and CAPTCHAs.
 8. **Channels.** A channel is a room everyone in the office can read. Write
-   `@name` to ask an agent to act; its answer is posted there. Agents can read
+   `@name` to ask an agent to act; its answer is posted there. A message
+   without a name is offered to the agents whose computers are on, one after
+   the other (whoever spoke last first), until one has something to say; if
+   none does, the channel says so. An agent that is only referred to ("tell
+   @lea") stays quiet until it is actually handed the work. Agents can read
    and post to channels themselves and hand work to each other with `@name`.
    A chain of hand-offs stops after three steps so agents cannot keep each
    other busy indefinitely. An agent needs its computer on to respond, and

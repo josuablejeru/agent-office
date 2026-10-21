@@ -174,7 +174,8 @@ export function ChannelView({ channel, agents, avatarVersion }: Props) {
           </button>
         </form>
         <div className="composer-foot">
-          Agents see this channel and may act on what is written here.
+          Write @name to ask one agent. Without a name, agents whose computers are on take turns: the first
+          with something to say answers.
         </div>
       </section>
     </div>

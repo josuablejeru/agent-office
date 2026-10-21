@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 
 from backend.agents.channels import (
     DEFAULT_CHANNEL,
+    HUMAN_AUTHOR,
     SYSTEM_AUTHOR,
     ChannelError,
     ChannelService,
@@ -126,6 +127,14 @@ class DatabaseObserver:
         )
 
 
+# What an agent answers in a channel when the message is not for it: nothing is posted.
+PASS_WORD = "PASS"
+
+
+def is_pass(text: str | None) -> bool:
+    return (text or "").strip().strip("*_`.!").upper() == PASS_WORD
+
+
 class RunService:
     def __init__(
         self,
@@ -151,6 +160,8 @@ class RunService:
         self._provider_factory = provider_factory
         self._client_factory = client_factory
         self._tasks: dict[int, asyncio.Task[None]] = {}
+        # Channel messages being offered to agents in turn.
+        self._background: set[asyncio.Future[None]] = set()
         # Per agent: set while the agent may act, cleared during manual control.
         self._may_act: dict[int, asyncio.Event] = {}
         # Mentions that arrived while an agent was busy: the latest one per agent
@@ -238,6 +249,10 @@ class RunService:
             and (only_agent is None or agents[name].id == only_agent)
         ]
         if not targets:
+            if only_agent is None and message.author == HUMAN_AUTHOR and not mentions(message.content):
+                # Addressed to nobody in particular: offered to whoever is around.
+                self._background.add(asyncio.ensure_future(self._offer_to_everyone(message, agents)))
+                self._background = {task for task in self._background if not task.done()}
             return
 
         def note(text: str) -> None:
@@ -264,11 +279,64 @@ class RunService:
                     f"You were mentioned in the shared channel #{channel.name} by {message.author}. "
                     f"Do what is asked of you there. Your final answer is posted to #{channel.name} "
                     "automatically, so do not post it yourself as well. Mention a colleague with "
-                    "@name only if you need them to do something.\n\n"
+                    "@name only if you need them to do something. If the message only refers to "
+                    f"you and nothing is asked of you yet, answer with exactly {PASS_WORD} and "
+                    "nothing is posted.\n\n"
                     f"Recent messages in #{channel.name}:\n{transcript}"
                 )
                 self.start(agent.id, task, channel_id=message.channel_id, hops=hops + 1)
                 log.info("agent woken by mention", extra={"agent": name, "channel": channel.name, "hops": hops})
+
+    async def _offer_to_everyone(self, message: ChannelMessage, agents: dict[str, Agent]) -> None:
+        """A message to nobody in particular: agents who are around take turns, until one answers.
+
+        One at a time, so each sees what was said before it, starting with whoever
+        spoke in the channel last; the first with something to say answers.
+        """
+        channel = self._channels.get(message.channel_id)
+        if channel is None:
+            return
+        recent = self._channels.messages(message.channel_id, limit=CHANNEL_CONTEXT_MESSAGES)
+        last_spoke = {row.author: row.id for row in recent}
+        candidates = []
+        for agent in agents.values():
+            if agent.id is None or permissions_of(agent)["channels"] == "off" or self.is_busy(agent.id):
+                continue
+            if await self._vm_manager.status(agent) == VMStatus.RUNNING:
+                candidates.append(agent)
+        candidates.sort(key=lambda agent: (-last_spoke.get(agent.name, 0), agent.name))
+        if not candidates:
+            self._channels.post(
+                message.channel_id, SYSTEM_AUTHOR,
+                "Nobody picked this up: no agent's computer is on. Turn one on, or mention an agent with @name.",
+            )
+            return
+        for agent in candidates:
+            assert agent.id is not None
+            if self.is_busy(agent.id):
+                continue
+            transcript = "\n".join(
+                f"{row.author}: {row.content}"
+                for row in self._channels.messages(message.channel_id, limit=CHANNEL_CONTEXT_MESSAGES)
+            )
+            task = (
+                f"{message.author} wrote in the shared channel #{channel.name} without addressing "
+                "anyone by name. Answer if it is meant for you or you are well placed to help; your "
+                f"answer is posted to #{channel.name} automatically. If it is not for you, a "
+                f"colleague is better placed, or it has already been answered, answer with exactly "
+                f"{PASS_WORD} and nothing is posted.\n\n"
+                f"Recent messages in #{channel.name}:\n{transcript}"
+            )
+            self.start(agent.id, task, channel_id=message.channel_id, hops=1)
+            log.info("channel message offered", extra={"agent": agent.name, "channel": channel.name})
+            await self.wait(agent.id)
+            if any(row.author == agent.name and row.id > (message.id or 0)
+                   for row in self._channels.messages(message.channel_id, after_id=message.id or 0)):
+                return  # someone took it up
+        self._channels.post(
+            message.channel_id, SYSTEM_AUTHOR,
+            "Nobody had anything to add. Mention an agent with @name to ask someone directly.",
+        )
 
     def _channel_handlers(
         self, agent: Agent, hops: int, run_id: int | None = None
@@ -294,8 +362,12 @@ class RunService:
             return {"messages": [{"author": row.author, "content": row.content} for row in rows]}
 
         async def post(args: dict[str, Any]) -> dict[str, Any]:
+            text = str(args.get("message") or "")
+            if is_pass(text):
+                # Some models "pass" by posting the word: that means staying quiet, too.
+                return {"posted": False, "note": "Nothing was posted: you passed."}
             try:
-                message = self._channels.post(resolve(args), agent.name, str(args.get("message") or ""))
+                message = self._channels.post(resolve(args), agent.name, text)
             except ChannelError as exc:
                 return {"error": str(exc)}
             if run_id is not None:
@@ -451,7 +523,7 @@ class RunService:
                 )
                 already_posted = run_id in self._posted_in_run
                 self._posted_in_run.discard(run_id)
-                if run.channel_id is not None and not already_posted:
+                if run.channel_id is not None and not already_posted and not is_pass(result.text):
                     reply = self._channels.post(run.channel_id, agent.name, result.text or EMPTY_REPLY)
                     await self.dispatch_mentions(reply, run.hops)
                 return

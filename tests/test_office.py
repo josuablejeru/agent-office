@@ -273,8 +273,10 @@ def test_channel_api(app_client: Any) -> None:
     posted = client.post(f"/api/channels/{general['id']}/messages", json={"content": "hello team"})
     assert posted.status_code == 201 and posted.json()["author"] == "you"
     messages = client.get(f"/api/channels/{general['id']}/messages").json()
-    assert [m["content"] for m in messages] == ["hello team"]
-    assert client.get(f"/api/channels/{general['id']}/messages?after={messages[0]['id']}").json() == []
+    # Addressed to nobody, and nobody is around: the channel says so instead of staying silent.
+    assert messages[0]["content"] == "hello team"
+    assert [m["author"] for m in messages[1:]] == ["system"] and "Nobody picked this up" in messages[1]["content"]
+    assert client.get(f"/api/channels/{general['id']}/messages?after={messages[-1]['id']}").json() == []
     assert client.get("/api/channels/999/messages").status_code == 404
 
 
@@ -288,14 +290,14 @@ class SilentGuest:
 class ChannelWorld:
     """A run service with two agents, a fake model and controllable VM states."""
 
-    def __init__(self, tmp_path: Path, reply: str = "On it.") -> None:
+    def __init__(self, tmp_path: Path, reply: str = "On it.", replies: dict[str, list[str]] | None = None) -> None:
         settings = Settings(home=tmp_path)
         settings.ensure_layout()
         self.engine = create_db_engine(settings.db_path)
         init_db(self.engine)
         with Session(self.engine) as session:
             for name in ("alice", "bob"):
-                session.add(Agent(name=name, provider="ollama", model="m", vm_daemon_port=18000,
+                session.add(Agent(name=name, provider="ollama", model=name, vm_daemon_port=18000,
                                   vm_disk_path=str(tmp_path / f"{name}.qcow2")))
             session.commit()
         self.channels = ChannelService(self.engine)
@@ -305,10 +307,18 @@ class ChannelWorld:
         self.prompts: list[str] = []
         world = self
 
+        queued = {name: list(texts) for name, texts in (replies or {}).items()}
+        self.asked: list[str] = []  # which agent's model was asked, in order
+
         class Provider(ModelProvider):
+            def __init__(self, model: str) -> None:
+                self.model = model
+
             async def chat(self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None) -> ModelResponse:
                 world.prompts.append(messages[-1].content)
-                return ModelResponse(text=reply)
+                world.asked.append(self.model)
+                texts = queued.get(self.model)
+                return ModelResponse(text=texts.pop(0) if texts else reply)
 
         class VMs(QemuVMManager):
             async def status(self, agent: Agent) -> VMStatus:
@@ -318,13 +328,19 @@ class ChannelWorld:
                 return "s"
 
         self.service = RunService(self.engine, settings, VMs(settings), PolicyEngine(), ApprovalBroker(),
-                                  provider_factory=lambda n, c, m: Provider(),
+                                  provider_factory=lambda n, c, m: Provider(m),
                                   client_factory=lambda port, secret: SilentGuest(),  # type: ignore[arg-type,return-value]
                                   channels=self.channels)
 
     async def say(self, content: str, author: str = "you") -> None:
         message = self.channels.post(self.channel_id, author, content)
         await self.service.dispatch_mentions(message)
+        for _ in range(50):  # messages to nobody are offered in the background
+            await asyncio.sleep(0.02)
+            if not self.service._background or all(t.done() for t in self.service._background):  # noqa: SLF001
+                break
+        for task in list(self.service._background):  # noqa: SLF001
+            await task
         for _ in range(200):
             if not any(self.service.is_busy(i) for i in (1, 2)):
                 await asyncio.sleep(0.02)
@@ -647,3 +663,59 @@ def test_shutdown_keeps_other_backends_out_until_the_vms_are_off(
     monkeypatch.setenv("AGENT_OFFICE_HOME", str(settings.home))
     shutdown.main()
     assert seen == [True] and not is_running(settings)
+
+
+# --- messages to nobody in particular, and agents that pass ----------------------------------
+
+
+def test_a_message_to_nobody_is_taken_up_by_whoever_is_around(tmp_path: Path) -> None:
+    world = ChannelWorld(tmp_path, replies={"alice": ["PASS"], "bob": ["I can do that today."]})
+    asyncio.run(world.say("could someone check the printer?"))
+    assert world.transcript() == [("you", "could someone check the printer?"), ("bob", "I can do that today.")]
+    assert world.asked == ["alice", "bob"]  # one after the other: alice passed, so bob was asked
+
+
+def test_once_someone_answered_nobody_else_is_asked(tmp_path: Path) -> None:
+    world = ChannelWorld(tmp_path, replies={"alice": ["Done, it is fixed."]})
+    asyncio.run(world.say("the printer is broken again"))
+    assert world.transcript()[-1] == ("alice", "Done, it is fixed.") and world.asked == ["alice"]
+
+
+def test_whoever_spoke_last_is_asked_first(tmp_path: Path) -> None:
+    world = ChannelWorld(tmp_path, replies={"bob": ["Sure, here it is.", "Yes, also done."]})
+    asyncio.run(world.say("@bob send me the report"))
+    asyncio.run(world.say("and the one from last month?"))
+    assert world.asked[-1] == "bob" and world.transcript()[-1] == ("bob", "Yes, also done.")
+
+
+def test_when_nobody_has_anything_to_add_the_channel_says_so(tmp_path: Path) -> None:
+    world = ChannelWorld(tmp_path, replies={"alice": ["PASS"], "bob": ["**PASS**"]})
+    asyncio.run(world.say("nice weather today"))
+    assert world.transcript()[-1][0] == "system" and "Nobody had anything to add" in world.transcript()[-1][1]
+
+
+def test_an_agent_only_referred_to_does_not_answer_out_of_turn(tmp_path: Path) -> None:
+    # "tell @bob": both are woken; bob has nothing to do yet and passes, then answers alice's hand-off.
+    world = ChannelWorld(tmp_path, replies={"alice": ["Total is 1,284.60. @bob please book the trip."],
+                                            "bob": ["PASS", "Booked."]})
+    asyncio.run(world.say("@alice total the costs and tell @bob if the trip fits"))
+    assert world.transcript() == [
+        ("you", "@alice total the costs and tell @bob if the trip fits"),
+        ("alice", "Total is 1,284.60. @bob please book the trip."),
+        ("bob", "Booked."),
+    ]
+    assert "PASS" in world.prompts[0] or "PASS" in world.prompts[1]
+
+
+def test_agents_messages_without_a_mention_wake_nobody(tmp_path: Path) -> None:
+    world = ChannelWorld(tmp_path)
+    asyncio.run(world.say("I am done for today.", author="alice"))
+    assert world.asked == []
+
+
+def test_passing_through_the_channel_tool_posts_nothing_either(tmp_path: Path) -> None:
+    world = ChannelWorld(tmp_path)
+    handlers = world.service._channel_handlers(Agent(id=1, name="alice", provider="ollama", model="m",  # noqa: SLF001
+                                                      vm_disk_path="/d"), hops=1)
+    result = asyncio.run(handlers["channel.post"]({"message": " PASS. "}))
+    assert result["posted"] is False and world.transcript() == []

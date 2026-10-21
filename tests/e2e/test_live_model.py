@@ -145,3 +145,32 @@ def test_finds_and_clicks_something_only_visible_on_screen(office: Office) -> No
         assert any(left <= x <= left + 60 and top <= y <= top + 60 for x, y in hits), (hits, (left, top))
     finally:
         server.shutdown()
+
+
+def test_a_channel_message_to_nobody_is_answered_once(office: Office) -> None:
+    """Two agents around, a message without a name: one answers, the other stays quiet."""
+    provider, _, model = LIVE_MODEL.partition("/")
+    ids = []
+    for name, job in (("ana", "You are the office's accountant: numbers, invoices, budgets."),
+                      ("ben", "You are the office's IT support: computers, printers, networks.")):
+        response = office.api("POST", "/api/agents", json={
+            "name": name, "provider": provider, "model": model, "system_prompt": job,
+            "vm_memory_mb": 3072, "vm_cpus": 2})
+        assert response.status_code == 201, response.text
+        ids.append(response.json()["id"])
+    for agent_id in ids:
+        office.turn_on(agent_id)
+    channel = office.api("GET", "/api/channels").json()[0]["id"]
+    before = len(office.api("GET", f"/api/channels/{channel}/messages").json())
+    office.api("POST", f"/api/channels/{channel}/messages",
+               json={"content": "The printer on the second floor keeps jamming. Can someone look at it?"})
+
+    def replies() -> list[dict[str, Any]]:
+        return office.api("GET", f"/api/channels/{channel}/messages").json()[before + 1:]
+
+    office.wait_until(lambda: len(replies()) >= 1, TASK_SECONDS, "an answer in the channel")
+    import time
+
+    time.sleep(60)  # anyone else would have spoken by now
+    authors = [message["author"] for message in replies()]
+    assert authors == ["ben"], [(m["author"], m["content"][:80]) for m in replies()]
