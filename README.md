@@ -147,7 +147,11 @@ found again on the next start.
 ## Using it
 
 1. **New agent.** Pick a character (or upload a photo), a provider and a
-   model, and adjust the job description. Under "More options": a fallback
+   model, and adjust the job description. **Write with AI** turns a few words
+   about the role into a job description, and **Draw with AI** has the model
+   draw a few avatars to choose from, both with the model chosen in the form.
+   The drawings are reduced to plain shapes before they are shown; small local
+   models draw crudely and slowly, larger ones much better. Under "More options": a fallback
    model, memory and CPUs. The Permissions tab sets what the agent may do
    (see [Policy](#policy)).
 2. **Turn on its computer.** The first start creates the agent's disk; later

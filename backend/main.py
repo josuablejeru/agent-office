@@ -19,6 +19,7 @@ from backend.agents.channels import ChannelService
 from backend.agents.manager import AgentManager
 from backend.agents.runtime import RunService
 from backend.api import agents as agents_api
+from backend.api import assist as assist_api
 from backend.api import channels as channels_api
 from backend.api import chat as chat_api
 from backend.api import desktop as desktop_api
@@ -186,6 +187,7 @@ def create_app(
     app.include_router(channels_api.router, dependencies=protected)
     app.include_router(files_api.router, dependencies=protected)
     app.include_router(memory_api.router, dependencies=protected)
+    app.include_router(assist_api.router, dependencies=protected)
     # Checks the token itself: its WebSocket route cannot use header auth.
     app.include_router(desktop_api.router)
 

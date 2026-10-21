@@ -14,6 +14,7 @@ dependencies = [
     "anthropic[vertex]>=1.11.0",
     "truststore>=0.10",
     "cryptography>=43",
+    "defusedxml>=0.7",
 ]
 
 [dependency-groups]

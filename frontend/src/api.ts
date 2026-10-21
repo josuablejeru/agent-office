@@ -141,6 +141,10 @@ export const api = {
   postToChannel: (id: number, content: string) =>
     request<ChannelMessage>(`/api/channels/${id}/messages`, post({ content })),
   dnsStatus: () => request<DnsStatus>("/api/system/dns"),
+  writeJobDescription: (payload: { provider: string; model: string; name: string; role: string }) =>
+    request<{ text: string }>("/api/assist/job-description", post(payload)),
+  drawAvatars: (payload: { provider: string; model: string; description: string; count: number }) =>
+    request<{ candidates: string[] }>("/api/assist/avatar", post(payload)),
   version: () => request<{ version: string; release: boolean }>("/api/system/version"),
   updateStatus: () => request<UpdateStatus>("/api/system/update"),
   checkForUpdate: () => request<UpdateStatus>("/api/system/update/check", post()),

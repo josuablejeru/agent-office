@@ -2,6 +2,7 @@ import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "r
 import { api } from "./api";
 import { Avatar } from "./Avatar";
 import { Permissions } from "./Permissions";
+import { DrawWithAi, WriteWithAi } from "./AiAssist";
 import { ModelTest } from "./ModelTest";
 import { CUSTOM_AVATAR, PERSONAS, personaFor } from "./personas";
 import type { Agent, AgentCreate, Provider } from "./types";
@@ -72,6 +73,13 @@ export function AgentForm({
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
+  const [drawing, setDrawing] = useState(false);
+
+  // A starting point for the picture: the first sentence of the job description.
+  const drawingSuggestion = () => {
+    const first = form.system_prompt.split(/(?<=[.!?])\s/)[0] ?? "";
+    return first.replace(/^You (are|work)\s+/i, "").slice(0, 160);
+  };
   const [tab, setTab] = useState<"profile" | "permissions">(initialTab);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +254,17 @@ export function AgentForm({
             )}
             <span>Your photo</span>
           </button>
+          <button
+            type="button"
+            className={drawing ? "persona active" : "persona"}
+            title="Let the model draw a picture"
+            onClick={() => setDrawing((open) => !open)}
+          >
+            <span className="avatar upload" style={{ width: 44, height: 44 }}>
+              ✦
+            </span>
+            <span>Draw with AI</span>
+          </button>
           <input
             ref={fileInput}
             type="file"
@@ -254,6 +273,15 @@ export function AgentForm({
             onChange={choosePhoto}
           />
         </div>
+
+        {drawing && (
+          <DrawWithAi
+            choice={{ provider: form.provider, model: form.model }}
+            suggestion={drawingSuggestion()}
+            onChosen={(picture) => setPhoto(picture)}
+            onClose={() => setDrawing(false)}
+          />
+        )}
 
         <label>
           Name
@@ -304,6 +332,11 @@ export function AgentForm({
             onChange={(e) => set("system_prompt", e.target.value)}
           />
         </label>
+        <WriteWithAi
+          choice={{ provider: form.provider, model: form.model }}
+          name={form.name}
+          onWritten={(text) => set("system_prompt", text)}
+        />
 
         <button type="button" className="disclosure" onClick={() => setAdvanced((open) => !open)}>
           {advanced ? "▾" : "▸"} More options

@@ -1544,3 +1544,50 @@ textarea:focus {
   color: var(--on-accent);
   font-weight: 600;
 }
+
+/* AI help in the agent form */
+
+.ai-assist,
+.ai-draw {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-assist-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-assist-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-draw {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.ai-draw-choices {
+  display: flex;
+  gap: 10px;
+}
+
+.ai-draw-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ai-draw-choice img {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+}
