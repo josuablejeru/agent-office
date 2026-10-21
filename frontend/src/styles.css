@@ -815,12 +815,20 @@ textarea:focus {
 /* Providers and first-run setup */
 
 .sidebar-link {
+  display: block;
   text-align: left;
   border: none;
   border-radius: 10px;
   padding: 8px;
   font-size: 0.88rem;
   color: var(--muted);
+  text-decoration: none;
+}
+
+.sidebar-link:hover,
+.sidebar-link.active {
+  background: var(--raised);
+  color: var(--text);
 }
 
 .notice.setup {
@@ -1445,4 +1453,59 @@ textarea:focus {
   padding: 2px 12px 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   user-select: text;
+}
+
+/* Settings: a page of its own */
+
+.settings-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 22px 32px 0;
+}
+
+.settings-header h1 {
+  font-size: 1.4rem;
+  margin: 0 0 12px;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.settings-tabs a {
+  padding: 8px 14px;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  font-size: 0.9rem;
+}
+
+.settings-tabs a.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* The sections reuse the dialog's form styles, laid out as a page. */
+.modal.settings-body {
+  max-width: 820px;
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  padding: 24px 32px 48px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }

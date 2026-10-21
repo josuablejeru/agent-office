@@ -4,9 +4,18 @@ import { ModelTest } from "./ModelTest";
 import { PackageRepositorySettings } from "./PackageRepository";
 import type { DnsStatus, Provider } from "./types";
 
+export type SettingsSection = "general" | "network" | "packages" | "models";
+
+export const SETTINGS_SECTIONS: [SettingsSection, string][] = [
+  ["general", "General"],
+  ["network", "Network"],
+  ["packages", "Package repository"],
+  ["models", "Model providers"],
+];
+
 interface Props {
   providers: Provider[];
-  onClose: () => void;
+  section: SettingsSection;
   onChanged: () => Promise<void>;
 }
 
@@ -170,7 +179,8 @@ function AddProvider({ onChanged }: { onChanged: () => Promise<void> }) {
   );
 }
 
-export function SettingsModal({ providers, onClose, onChanged }: Props) {
+/** Settings, as a page of its own (#/settings/<section>). */
+export function SettingsPage({ providers, section, onChanged }: Props) {
   const [keepRunning, setKeepRunning] = useState<boolean | null>(null);
   const [dns, setDns] = useState<DnsStatus | null>(null);
   const [certificateError, setCertificateError] = useState<string | null>(null);
@@ -212,9 +222,26 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <h2>Settings</h2>
+    <div className="settings-page">
+      <header className="settings-header">
+        <h1>Settings</h1>
+        <nav className="settings-tabs" role="tablist">
+          {SETTINGS_SECTIONS.map(([key, label]) => (
+            <a
+              key={key}
+              role="tab"
+              href={`#/settings/${key}`}
+              aria-selected={section === key}
+              className={section === key ? "active" : ""}
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+      </header>
+      <div className="modal settings-body">
+        {section === "general" && (
+          <>
 
         <label className="toggle">
           <input
@@ -230,7 +257,11 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
           running in the background and use memory until you stop them.
         </p>
 
-        <h3>Network</h3>
+          </>
+        )}
+        {section === "network" && (
+          <>
+        <h3>Name lookup and VPN</h3>
         {dns?.active ? (
           <>
             <p className="hint">
@@ -251,7 +282,7 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
           </p>
         )}
 
-        <h4>Trusted certificates</h4>
+        <h3>Trusted certificates</h3>
         <p className="hint">
           For networks that inspect secure connections with their own root certificate. Agents&apos; computers
           trust the roots this Mac trusts beyond the public ones, and any you add here. Changes reach a
@@ -286,9 +317,17 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
         </label>
         {certificateError && <p className="form-error">{certificateError}</p>}
 
-        <h4>Package repository</h4>
+          </>
+        )}
+        {section === "packages" && (
+          <>
+        <h3>Package repository (JFrog Artifactory)</h3>
         <PackageRepositorySettings />
 
+          </>
+        )}
+        {section === "models" && (
+          <>
         <h3>Model providers</h3>
         <p className="hint">
           API keys are stored in your macOS Keychain and never reach an agent&apos;s computer. More
@@ -303,10 +342,8 @@ export function SettingsModal({ providers, onClose, onChanged }: Props) {
           ),
         )}
         <AddProvider onChanged={onChanged} />
-        <div className="modal-actions">
-          <span className="spacer" />
-          <button onClick={onClose}>Done</button>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

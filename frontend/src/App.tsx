@@ -4,14 +4,14 @@ import { AgentView } from "./AgentView";
 import { api, loadToken, saveToken, setToken, UnauthorizedError } from "./api";
 import { Avatar } from "./Avatar";
 import { ChannelView } from "./ChannelView";
-import { SettingsModal } from "./SettingsModal";
+import { parseRoute, routeFor, type View } from "./route";
+import { SettingsPage } from "./SettingsPage";
 import { SetupBanner } from "./SetupBanner";
 import { TokenPrompt } from "./TokenPrompt";
 import type { Agent, Capabilities, Channel, Provider } from "./types";
 
 const REFRESH_INTERVAL_MS = 3000;
 
-type View = { kind: "agent"; id: number } | { kind: "channel"; id: number } | null;
 
 const ACTIVITY_LABELS: Record<Agent["activity"], string> = {
   idle: "",
@@ -25,9 +25,9 @@ export function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [view, setView] = useState<View>(null);
+  // Where the user is, kept in the URL fragment (#/agents/1, #/settings/network...).
+  const [view, setView] = useState<View>(() => parseRoute(window.location.hash));
   const [creating, setCreating] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [version, setVersion] = useState<{ version: string; release: boolean } | null>(null);
 
   useEffect(() => {
@@ -49,6 +49,7 @@ export function App() {
     setChannels(channelList);
     setView((current) => {
       const exists =
+        current?.kind === "settings" ||
         (current?.kind === "agent" && agentList.some((a) => a.id === current.id)) ||
         (current?.kind === "channel" && channelList.some((c) => c.id === current.id));
       if (exists) return current;
@@ -87,10 +88,30 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [authorized, connect]);
 
+  // The address follows the view, and Back, Forward and links move the view.
+  useEffect(() => {
+    const route = routeFor(view);
+    if (!route || route === window.location.hash) return;
+    if (!window.location.hash || window.location.hash.startsWith("#token=")) {
+      window.history.replaceState(null, "", route); // the first view: no extra Back step
+    } else {
+      window.location.hash = route;
+    }
+  }, [view]);
+
+  useEffect(() => {
+    const follow = () => {
+      const next = parseRoute(window.location.hash);
+      if (next) setView(next);
+    };
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
+
   // An error belongs to what the user was doing; moving elsewhere dismisses it.
   useEffect(() => {
     setError(null);
-  }, [view?.kind, view?.id]);
+  }, [view?.kind, view && "id" in view ? view.id : view?.section]);
 
   useEffect(() => {
     if (!authorized) return;
@@ -185,9 +206,12 @@ export function App() {
             </button>
           ))}
         </nav>
-        <button className="sidebar-link" onClick={() => setSettingsOpen(true)}>
+        <a
+          className={view?.kind === "settings" ? "sidebar-link active" : "sidebar-link"}
+          href={routeFor({ kind: "settings", section: view?.kind === "settings" ? view.section : "general" })}
+        >
           Settings
-        </button>
+        </a>
         {version && (
           <div className="sidebar-version" title={version.release ? "Release" : "Local build: git commit"}>
             {version.release ? version.version : `local build ${version.version}`}
@@ -204,7 +228,13 @@ export function App() {
         )}
         {error && <div className="notice error">{error}</div>}
         {authorized && capabilities?.ready && <SetupBanner />}
-        {selectedAgent ? (
+        {view?.kind === "settings" ? (
+          <SettingsPage
+            providers={providers}
+            section={view.section}
+            onChanged={async () => setProviders(await api.listProviders())}
+          />
+        ) : selectedAgent ? (
           <AgentView
             key={selectedAgent.id}
             agent={selectedAgent}
@@ -235,14 +265,6 @@ export function App() {
           )
         )}
       </main>
-
-      {settingsOpen && (
-        <SettingsModal
-          providers={providers}
-          onClose={() => setSettingsOpen(false)}
-          onChanged={async () => setProviders(await api.listProviders())}
-        />
-      )}
 
       {creating && (
         <AgentForm
