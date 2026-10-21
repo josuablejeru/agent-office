@@ -8,6 +8,7 @@ import type {
   MemoryView,
   PackageRepository,
   PackageRepositoryUpdate,
+  ClaudeDesktopServer,
   McpServer,
   McpServerForm,
   PermissionsInfo,
@@ -154,6 +155,9 @@ export const api = {
     request<void>(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }),
   testMcpServer: (form: McpServerForm) =>
     request<{ ok: boolean; detail: string; tools: string[] }>("/api/mcp/servers/test", post(form)),
+  claudeDesktopServers: () => request<{ servers: ClaudeDesktopServer[] }>("/api/mcp/claude-desktop"),
+  importClaudeDesktop: (names: string[]) =>
+    request<McpServer[]>("/api/mcp/claude-desktop/import", post({ names })),
   version: () => request<{ version: string; release: boolean }>("/api/system/version"),
   updateStatus: () => request<UpdateStatus>("/api/system/update"),
   checkForUpdate: () => request<UpdateStatus>("/api/system/update/check", post()),

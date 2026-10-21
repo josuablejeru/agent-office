@@ -185,20 +185,44 @@ export interface ToolCall {
   result: Record<string, unknown> | null;
 }
 
+export type McpTransport = "stdio" | "http";
+
 export interface McpServer {
   name: string;
+  transport: McpTransport;
   url: string;
   auth_header: string;
+  command: string;
+  args: string[];
+  cwd: string;
   description: string;
+  always_ask: boolean;
   has_token: boolean;
+  env_keys: string[];
 }
 
 export interface McpServerForm {
   name: string;
+  transport: McpTransport;
   url: string;
   auth_header: string;
+  command: string;
+  args: string[];
+  cwd: string;
   description: string;
+  always_ask: boolean;
   token: string;
+  /** Empty value: keep the stored one. A name left out is removed. */
+  env: Record<string, string>;
+}
+
+export interface ClaudeDesktopServer {
+  name: string;
+  transport: McpTransport;
+  describe: string;
+  env_keys: string[];
+  has_token: boolean;
+  exists: boolean;
 }
 
 export interface PendingApproval {

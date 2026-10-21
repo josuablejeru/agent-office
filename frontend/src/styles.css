@@ -1612,3 +1612,33 @@ textarea:focus {
   gap: 6px;
   padding-left: 4px;
 }
+
+.mcp-env {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mcp-env .row {
+  align-items: center;
+}
+
+.mcp-describe {
+  overflow-wrap: anywhere;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+}

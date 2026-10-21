@@ -56,9 +56,42 @@ def read_login_environment(shell: str | None = None) -> dict[str, str]:
     return variables
 
 
+FISH = ("/opt/homebrew/bin/fish", "/usr/local/bin/fish", "/usr/bin/fish")
+
+
+def terminal_shells() -> list[str]:
+    """The account's login shell, and fish when it is set up: many people run fish in
+    their terminal while the account itself stays on zsh."""
+    shells = [login_shell()]
+    fish = next((path for path in FISH if Path(path).is_file()), None)
+    if fish and (Path.home() / ".config" / "fish").is_dir() and Path(shells[0]).name != "fish":
+        shells.append(fish)
+    return shells
+
+
+def read_terminal_environment() -> dict[str, str]:
+    """The environment of the user's terminal shells together.
+
+    PATH joins all of them (the first shell's folders first); any other
+    variable comes from the first shell that sets it.
+    """
+    merged: dict[str, str] = {}
+    paths: list[str] = []
+    for shell in terminal_shells():
+        found = read_login_environment(shell)
+        for folder in found.get("PATH", "").split(":"):
+            if folder and folder not in paths:
+                paths.append(folder)
+        for name, value in found.items():
+            merged.setdefault(name, value)
+    if paths:
+        merged["PATH"] = ":".join(paths)
+    return merged
+
+
 def import_login_environment(shell: str | None = None) -> list[str]:
     """Add the listed variables from the login shell. Returns the names added."""
-    environment = read_login_environment(shell)
+    environment = read_login_environment(shell) if shell else read_terminal_environment()
     added = []
     for name in IMPORTED:
         if name in environment and environment[name] and name not in os.environ:

@@ -85,6 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     update_checks = asyncio.create_task(check_for_updates_daily(app))
     yield
     update_checks.cancel()
+    await app.state.mcp.close()  # stop the command servers it started
     if app.state.dns is not None:
         app.state.dns.stop()
     app.state.instance_lock.close()
@@ -183,6 +184,19 @@ def create_app(
     app.state.updater = Updater(settings, busy=busy)
     # MCP servers: tokens in the Keychain, the app as the client.
     app.state.mcp = MCPRegistry(settings, key_store)
+
+    async def mcp_environment() -> dict[str, str]:
+        """For command servers: Node trusts the company's root certificates too; uv uses the Mac's."""
+        env = {"UV_NATIVE_TLS": "1"}
+        pem = await app.state.certificates.bundle()
+        if pem:
+            path = settings.home / "certificates-for-mcp.pem"
+            if not path.exists() or path.read_text() != pem:
+                path.write_text(pem)
+            env["NODE_EXTRA_CA_CERTS"] = str(path)
+        return env
+
+    app.state.mcp.base_env = mcp_environment
     app.state.run_service.mcp = app.state.mcp
 
     protected = [Depends(require_api_token)]

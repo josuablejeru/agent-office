@@ -57,9 +57,10 @@ it. Vertex AI works with your existing `gcloud` sign-in.
 
 ### Extend them with MCP
 
-Set up your company's MCP servers (tickets, wiki, CRM…) once, in one place,
-and choose per agent which ones it may use. Their tools go through the same
-approvals; the tokens stay in your Keychain.
+Bring the MCP servers you use in Claude Desktop (`npx`, `uvx`, local
+programs or remote servers), or import them in one click. Set them up once,
+in one place, and choose per agent which ones it may use. Their tools go
+through the same approvals, and the tokens stay in your Keychain.
 
 ### Use any model
 
@@ -197,11 +198,16 @@ found again on the next start.
    other busy indefinitely. An agent needs its computer on to respond, and
    Channels must not be switched off in its permissions.
 
-9. **MCP servers.** Set up remote MCP servers once under Settings › MCP
-   servers (address, token, Test), then tick them on an agent's Permissions
-   tab. Their tools ask for your approval unless you allow them. The app is the
-   MCP client, so tokens stay in your Keychain and never reach an agent's
-   computer. Only servers reachable over HTTP; see `docs/specs/mcp.md`.
+9. **MCP servers.** Under Settings › MCP servers, add servers as in Claude
+   Desktop: a command (`npx -y …`, `uvx …`, a local program) or a remote
+   address. You can also **Import from Claude Desktop**. Then tick them on an
+   agent's Permissions tab.
+   - Their tools ask for your approval unless you allow them. Command servers
+     run on your Mac with your rights, so they always ask by default.
+   - Tokens and environment values stay in your Keychain and never reach an
+     agent's computer.
+
+   See `docs/specs/mcp.md`.
 
 ### Characters and photos
 

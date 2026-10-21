@@ -507,6 +507,10 @@ class RunService:
                     if current is None:
                         return PolicyDecision(action=PolicyAction.REJECT, reason="This agent was deleted.")
                     level = permissions_of(current).get(group_of(operation) or "", "allow")
+                    if level == "allow" and operation.startswith("mcp.") and self.mcp is not None:
+                        server = self.mcp.get(operation.split(".")[1])
+                        if server is not None and server.always_ask:
+                            level = "ask"  # a server set to "always ask" only ever tightens
                     use_jev, unknown = current.jev_enabled, unknown_action_of(current)
                 return await self._policy.evaluate(
                     operation, arguments, task=task, use_decision_provider=use_jev,
