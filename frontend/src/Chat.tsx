@@ -5,7 +5,8 @@ import remarkGfm from "remark-gfm";
 import { api } from "./api";
 import { ApprovalModal } from "./ApprovalModal";
 import { Screenshot } from "./Screenshot";
-import type { Agent, Message, Run, ToolCall } from "./types";
+import { modelName, rememberModel, rememberedModel } from "./ModelList";
+import type { Agent, Message, ModelChoice, Run, ToolCall } from "./types";
 
 const RUN_POLL_MS = 1000;
 const RUNS_SHOWN = 30;
@@ -82,6 +83,23 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  // The model for the next task: "" is the agent's own, otherwise a name from Settings.
+  const [models, setModels] = useState<ModelChoice[]>([]);
+  const [chosen, setChosen] = useState(() => rememberedModel(agent.id));
+  useEffect(() => {
+    void api
+      .modelChoices()
+      .then(setModels)
+      .catch(() => setModels([]));
+  }, []);
+  useEffect(() => setChosen(rememberedModel(agent.id)), [agent.id]);
+  // A name that was since removed in Settings falls back to the agent's own model.
+  const choice = models.find((model) => model.label === chosen) ?? null;
+  const isDefault = (model: ModelChoice) => model.provider === agent.provider && model.model === agent.model;
+  const choose = (label: string) => {
+    setChosen(label);
+    rememberModel(agent.id, label);
+  };
 
   const load = useCallback(async () => {
     const list = await api.listMessages(agent.id);
@@ -127,7 +145,7 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
     if (!content || activeRun !== null || !ready) return;
     setError(null);
     try {
-      const { run_id } = await api.sendMessage(agent.id, content);
+      const { run_id } = await api.sendMessage(agent.id, content, choice && !isDefault(choice) ? choice : null);
       setDraft("");
       await load();
       setActiveRun(run_id);
@@ -175,6 +193,11 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
                     {message.content}
                   </Markdown>
                   <div className="message-actions">
+                    {run && run.model && (
+                      <span className={`model-note${run.switched ? " switched" : ""}`} title={`${run.provider} · ${run.model}`}>
+                        {modelName(models, run.provider, run.model)}
+                      </span>
+                    )}
                     <CopyButton text={message.content} />
                   </div>
                 </div>
@@ -215,6 +238,25 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKey}
         />
+        {models.length > 0 && (
+          <select
+            className="model-switch"
+            aria-label="Model for this task"
+            title="Model for the tasks you send"
+            value={choice ? choice.label : ""}
+            disabled={activeRun !== null}
+            onChange={(e) => choose(e.target.value)}
+          >
+            <option value="">{modelName(models, agent.provider, agent.model)} (default)</option>
+            {models
+              .filter((model) => !isDefault(model))
+              .map((model) => (
+                <option key={model.label} value={model.label}>
+                  {model.label}
+                </option>
+              ))}
+          </select>
+        )}
         {activeRun !== null ? (
           <button
             type="button"
@@ -232,7 +274,8 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
         )}
       </form>
       <div className="composer-foot">
-        Requests go to {agent.provider} ({agent.model}). Actions run on the agent's own computer.
+        Requests go to {choice ? choice.provider : agent.provider} ({choice ? choice.model : agent.model}). Actions run
+        on the agent&apos;s own computer.
       </div>
 
       {active?.pending_approval && (

@@ -64,6 +64,10 @@ through the same approvals, and the tokens stay in your Keychain.
 
 ### Use any model
 
+Switch models per task: name the models you use under Settings › Model
+providers (say *Haiku* for quick jobs, *Opus* or *Gemini* for hard ones), then
+pick one next to the message box. Each answer shows which model wrote it.
+
 Ollama, LM Studio and any other OpenAI-compatible server, on this Mac or your
 network; OpenAI, Anthropic, and Gemini or Claude on Google Vertex AI. Models
 that read images can also **see** the browser and click by position, when you

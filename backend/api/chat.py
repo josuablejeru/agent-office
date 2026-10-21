@@ -22,7 +22,7 @@ from backend.api.deps import (
     SettingsDep,
     VMManagerDep,
 )
-from backend.db.models import Approval, Message, Run, ToolCall
+from backend.db.models import Agent, Approval, Message, Run, ToolCall
 from backend.vm.lifecycle import VMStatus
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -32,6 +32,9 @@ SCREENSHOT_NAME = re.compile(r"^[0-9a-f]{32}\.(jpg|png)$")
 
 class ChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
+    # Another model for this one task; both or neither.
+    provider: str | None = Field(default=None, max_length=63)
+    model: str | None = Field(default=None, max_length=200)
 
 
 class ChatStarted(BaseModel):
@@ -76,6 +79,10 @@ class RunRead(BaseModel):
     error: str | None
     started_at: datetime
     finished_at: datetime | None
+    # The model that did the work: the agent's own unless switched for this task.
+    provider: str
+    model: str
+    switched: bool
     tool_calls: list[ToolCallRead]
     # Set while the run is paused waiting for the user's decision.
     pending_approval: ApprovalRead | None
@@ -104,7 +111,9 @@ async def send_message(
     if await vms.status(agent) != VMStatus.RUNNING:
         raise HTTPException(status.HTTP_409_CONFLICT, "Start the agent's VM before chatting.")
     try:
-        return ChatStarted(run_id=runs.start(agent_id, payload.content))
+        return ChatStarted(run_id=runs.start(
+            agent_id, payload.content, provider=payload.provider or None, model=(payload.model or "").strip() or None,
+        ))
     except RunError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
@@ -131,6 +140,8 @@ def get_run(run_id: int, session: SessionDep) -> RunRead:
                 risk=approval.risk,
                 reason=approval.reason,
             )
+    agent = session.get(Agent, run.agent_id)
+    switched = bool(run.provider and run.model)
     return RunRead(
         id=run.id,
         agent_id=run.agent_id,
@@ -138,6 +149,9 @@ def get_run(run_id: int, session: SessionDep) -> RunRead:
         error=run.error,
         started_at=run.started_at,
         finished_at=run.finished_at,
+        provider=run.provider if switched else (agent.provider if agent else ""),
+        model=run.model if switched else (agent.model if agent else ""),
+        switched=switched,
         pending_approval=pending,
         tool_calls=[
             ToolCallRead(

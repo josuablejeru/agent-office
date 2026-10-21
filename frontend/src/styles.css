@@ -1644,3 +1644,51 @@ textarea:focus {
   font-size: 13px;
   font-weight: 600;
 }
+
+/* Model switching */
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) minmax(160px, 2fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-row .model-test-result {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 720px) {
+  .model-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.model-switch {
+  align-self: center;
+  max-width: 160px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 4px 8px;
+}
+
+.model-note {
+  align-self: center;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.model-note.switched {
+  color: var(--accent, var(--muted));
+  font-weight: 600;
+}

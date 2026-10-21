@@ -212,13 +212,22 @@ class RunService:
         return "needs_approval" if waiting is not None else "working"
 
     def start(
-        self, agent_id: int, content: str, channel_id: int | None = None, hops: int = 0
+        self, agent_id: int, content: str, channel_id: int | None = None, hops: int = 0,
+        provider: str | None = None, model: str | None = None,
     ) -> int:
-        """Store the user message and run the agent in the background. Returns the run id."""
+        """Store the user message and run the agent in the background. Returns the run id.
+
+        `provider` and `model` switch this one task to another model; by default
+        the agent's own is used.
+        """
         if self.is_busy(agent_id):
             raise RunError("This agent is already working on a message.")
+        if (provider is None) != (model is None):
+            raise RunError("Choose both a provider and a model.")
+        if provider is not None and provider not in self._settings.load_providers():
+            raise RunError(f"There is no provider '{provider}'.")
         with Session(self._engine) as session:
-            run = Run(agent_id=agent_id, channel_id=channel_id, hops=hops)
+            run = Run(agent_id=agent_id, channel_id=channel_id, hops=hops, provider=provider, model=model)
             session.add(run)
             session.commit()
             session.refresh(run)
@@ -442,7 +451,7 @@ class RunService:
                 session.add(approval)
             session.commit()
 
-    def _provider(self, agent: Agent) -> ModelProvider:
+    def _provider(self, agent: Agent, run: Run | None = None) -> ModelProvider:
         providers = self._settings.load_providers()
 
         def build(name: str, model: str) -> ModelProvider:
@@ -450,7 +459,11 @@ class RunService:
                 raise ProviderError(f"provider '{name}' is not defined in config.yaml")
             return self._provider_factory(name, providers[name], model)
 
-        primary = build(agent.provider, agent.model)
+        if run is not None and run.provider and run.model:
+            # Switched for this task; the agent's fallback still stands behind it.
+            primary = build(run.provider, run.model)
+        else:
+            primary = build(agent.provider, agent.model)
         if agent.fallback_provider and agent.fallback_model:
             return FallbackProvider(primary, build(agent.fallback_provider, agent.fallback_model))
         return primary
@@ -497,7 +510,8 @@ class RunService:
             assert agent is not None and agent.id is not None
             log.info(
                 "run started",
-                extra={"run": run_id, "agent": agent.name, "provider": agent.provider, "model": agent.model},
+                extra={"run": run_id, "agent": agent.name, "provider": run.provider or agent.provider,
+                       "model": run.model or agent.model},
             )
             agent_id = agent.id
 
@@ -539,7 +553,7 @@ class RunService:
                     vision=agent.vision_enabled,
                 )
                 result = await run_agent_loop(
-                    self._provider(agent),
+                    self._provider(agent, run),
                     self._history(session, agent, recalled),
                     [tool.spec for tool in tools],
                     executor,

@@ -10,6 +10,7 @@ import type {
   PackageRepositoryUpdate,
   ClaudeDesktopServer,
   McpServer,
+  ModelChoice,
   McpServerForm,
   PermissionsInfo,
   UpdateStatus,
@@ -192,8 +193,14 @@ export const api = {
       body: JSON.stringify({ project, region }),
     }),
   listMessages: (id: number) => request<Message[]>(`/api/agents/${id}/messages`),
-  sendMessage: (id: number, content: string) =>
-    request<{ run_id: number }>(`/api/agents/${id}/chat`, post({ content })),
+  sendMessage: (id: number, content: string, choice?: ModelChoice | null) =>
+    request<{ run_id: number }>(
+      `/api/agents/${id}/chat`,
+      post(choice ? { content, provider: choice.provider, model: choice.model } : { content }),
+    ),
+  modelChoices: () => request<ModelChoice[]>("/api/models"),
+  saveModelChoices: (models: ModelChoice[]) =>
+    request<ModelChoice[]>("/api/models", { method: "PUT", body: JSON.stringify(models) }),
   getRun: (runId: number) => request<Run>(`/api/runs/${runId}`),
   cancelRun: (id: number) => request<{ cancelled: boolean }>(`/api/agents/${id}/chat/cancel`, post()),
   answerApproval: (approvalId: number, approved: boolean) =>

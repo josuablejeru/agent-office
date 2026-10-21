@@ -118,6 +118,42 @@ async def list_providers(settings: SettingsDep, keys: KeyStoreDep) -> list[Provi
     ]
 
 
+class ModelChoice(BaseModel):
+    """A model to switch to, under a short name: "Haiku" for vertex / claude-haiku-4-5."""
+
+    label: str = Field(min_length=1, max_length=40)
+    provider: str = Field(min_length=1, max_length=63)
+    model: str = Field(min_length=1, max_length=200)
+
+
+@router.get("/models")
+async def list_models(settings: SettingsDep) -> list[ModelChoice]:
+    """The models the user switches between (Settings › Model providers)."""
+    found = []
+    for entry in settings.load_config().get("models") or []:
+        try:
+            found.append(ModelChoice.model_validate(entry))
+        except ValueError:
+            continue  # a hand-edited entry that does not fit is left out
+    return found
+
+
+@router.put("/models")
+async def save_models(payload: list[ModelChoice], settings: SettingsDep) -> list[ModelChoice]:
+    if len(payload) > 20:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "At most 20 models.")
+    labels = [choice.label.strip().lower() for choice in payload]
+    if len(set(labels)) != len(labels):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Give each model its own name.")
+    providers = settings.load_providers()
+    for choice in payload:
+        if choice.provider not in providers:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{choice.label}: there is no provider '{choice.provider}'.")
+    cleaned = [ModelChoice(label=c.label.strip(), provider=c.provider, model=c.model.strip()) for c in payload]
+    settings.update_user_config(["models"], [choice.model_dump() for choice in cleaned])
+    return cleaned
+
+
 @router.post("/providers", status_code=status.HTTP_201_CREATED)
 async def add_provider(payload: ProviderCreate, settings: SettingsDep) -> dict[str, str]:
     """Register an OpenAI-compatible model server (Ollama, LM Studio, vLLM, a gateway...)."""

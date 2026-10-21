@@ -84,6 +84,9 @@ class Run(SQLModel, table=True):
     channel_id: int | None = Field(default=None, foreign_key="channels.id")
     # How many agent-to-agent hand-offs led to this run (bounds mention chains).
     hops: int = 0
+    # The model this run used, when the user switched away from the agent's own.
+    provider: str | None = None
+    model: str | None = None
     started_at: datetime = Field(default_factory=utcnow)
     finished_at: datetime | None = None
 

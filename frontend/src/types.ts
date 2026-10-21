@@ -233,11 +233,21 @@ export interface PendingApproval {
   reason: string | null;
 }
 
+export interface ModelChoice {
+  label: string;
+  provider: string;
+  model: string;
+}
+
 export interface Run {
   id: number;
   agent_id: number;
   status: "running" | "completed" | "stopped" | "failed" | "interrupted" | "cancelled";
   error: string | null;
+  /** The model that did the work; `switched` when it was not the agent's own. */
+  provider: string;
+  model: string;
+  switched: boolean;
   tool_calls: ToolCall[];
   pending_approval: PendingApproval | null;
 }
