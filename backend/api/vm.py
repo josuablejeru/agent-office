@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -78,6 +78,8 @@ class AppSettings(BaseModel):
     keep_vms_running_on_quit: bool = False
     # Look for new releases on GitHub once a day.
     check_updates: bool = True
+    # "stable": final releases only; "beta": release candidates (vX.Y.Z-rcN) too.
+    update_channel: Literal["stable", "beta"] = "stable"
 
 
 class ModelStatus(BaseModel):
@@ -325,6 +327,7 @@ async def get_app_settings(settings: SettingsDep) -> AppSettings:
 async def set_app_settings(payload: AppSettings, settings: SettingsDep) -> AppSettings:
     settings.update_user_config(["app", "keep_vms_running_on_quit"], payload.keep_vms_running_on_quit)
     settings.update_user_config(["app", "check_updates"], payload.check_updates)
+    settings.update_user_config(["app", "update_channel"], payload.update_channel)
     return payload
 
 

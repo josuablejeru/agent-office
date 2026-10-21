@@ -12,7 +12,7 @@ from typing import Any
 
 class FakeGitHub:
     def __init__(self) -> None:
-        self.release: dict[str, Any] = {}
+        self.releases: list[dict[str, Any]] = []
         self.files: dict[str, bytes | Path] = {}
         self.limited = False  # answer like GitHub's rate limit
         self.requests: list[dict[str, str]] = []
@@ -32,10 +32,11 @@ class FakeGitHub:
 
             def do_GET(self) -> None:
                 outer.requests.append({"path": self.path, "if-none-match": self.headers.get("If-None-Match", "")})
-                if self.path == "/repos/x/releases/latest":
+                if self.path.startswith("/repos/x/releases"):
                     if outer.limited:
                         return self._send(403, b'{"message": "API rate limit exceeded"}')
-                    body = json.dumps(outer.release).encode()
+                    # Newest first, as GitHub lists them.
+                    body = json.dumps(list(reversed(outer.releases))).encode()
                     etag = '"' + hashlib.sha256(body).hexdigest()[:16] + '"'
                     if self.headers.get("If-None-Match") == etag:
                         return self._send(304)
@@ -53,7 +54,7 @@ class FakeGitHub:
 
     @property
     def latest_url(self) -> str:
-        return f"{self.url}/repos/x/releases/latest"
+        return f"{self.url}/repos/x/releases?per_page=30"
 
     def publish(self, tag: str, archive: bytes | Path | None = None, checksum: str | None = None,
                 notes: str = "## What's new\\n- Things", prerelease: bool = False) -> None:
@@ -65,8 +66,9 @@ class FakeGitHub:
             self.files[name] = archive
             self.files[name + ".sha256"] = f"{checksum or hashlib.sha256(data).hexdigest()}  {name}\\n".encode()
             assets = [{"name": n, "browser_download_url": f"{self.url}/download/{tag}/{n}"} for n in (name, name + ".sha256")]
-        self.release = {"tag_name": tag, "body": notes, "published_at": "2026-10-21T08:00:00Z",
-                        "draft": False, "prerelease": prerelease, "assets": assets}
+        self.releases = [release for release in self.releases if release["tag_name"] != tag]
+        self.releases.append({"tag_name": tag, "body": notes, "published_at": "2026-10-21T08:00:00Z",
+                              "draft": False, "prerelease": prerelease, "assets": assets})
 
     def close(self) -> None:
         self._server.shutdown()

@@ -190,9 +190,9 @@ def test_custom_avatar_photo_upload(app_client: Any, settings: Settings) -> None
 
 def test_settings_and_vertex_location_are_saved(app_client: Any, settings: Settings) -> None:
     client, _ = app_client
-    assert client.get("/api/settings").json() == {"keep_vms_running_on_quit": False, "check_updates": True}
-    client.put("/api/settings", json={"keep_vms_running_on_quit": True, "check_updates": True})
-    assert client.get("/api/settings").json() == {"keep_vms_running_on_quit": True, "check_updates": True}
+    assert client.get("/api/settings").json() == {"keep_vms_running_on_quit": False, "check_updates": True, "update_channel": "stable"}
+    client.put("/api/settings", json={"keep_vms_running_on_quit": True, "check_updates": True, "update_channel": "beta"})
+    assert client.get("/api/settings").json() == {"keep_vms_running_on_quit": True, "check_updates": True, "update_channel": "beta"}
 
     assert client.put("/api/providers/vertex/location",
                       json={"project": "my-project-123", "region": "europe-west4"}).status_code == 204

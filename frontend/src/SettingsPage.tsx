@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { ModelTest } from "./ModelTest";
 import { PackageRepositorySettings } from "./PackageRepository";
-import type { DnsStatus, Provider, UpdateStatus } from "./types";
+import type { AppSettings, DnsStatus, Provider, UpdateStatus } from "./types";
 
 export type SettingsSection = "general" | "network" | "packages" | "models";
 
@@ -181,8 +181,10 @@ function AddProvider({ onChanged }: { onChanged: () => Promise<void> }) {
 
 /** Settings, as a page of its own (#/settings/<section>). */
 export function SettingsPage({ providers, section, onChanged }: Props) {
-  const [keepRunning, setKeepRunning] = useState<boolean | null>(null);
-  const [checkUpdates, setCheckUpdates] = useState<boolean | null>(null);
+  // The app-wide settings, saved as a whole.
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const keepRunning = appSettings?.keep_vms_running_on_quit ?? null;
+  const checkUpdates = appSettings?.check_updates ?? null;
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [dns, setDns] = useState<DnsStatus | null>(null);
@@ -211,10 +213,7 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
   useEffect(() => {
     void api
       .getSettings()
-      .then((settings) => {
-        setKeepRunning(settings.keep_vms_running_on_quit);
-        setCheckUpdates(settings.check_updates);
-      })
+      .then(setAppSettings)
       .catch(() => undefined);
     void api
       .updateStatus()
@@ -226,19 +225,21 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
       .catch(() => undefined);
   }, []);
 
-  async function toggleKeepRunning(next: boolean) {
-    setKeepRunning(next);
-    await api
-      .setSettings({ keep_vms_running_on_quit: next, check_updates: checkUpdates ?? true })
-      .catch(() => setKeepRunning(!next));
+  async function saveSettings(change: Partial<AppSettings>) {
+    if (!appSettings) return;
+    const previous = appSettings;
+    const next = { ...appSettings, ...change };
+    setAppSettings(next);
+    try {
+      await api.setSettings(next);
+      setUpdate(await api.updateStatus()); // the channel decides which release is offered
+    } catch {
+      setAppSettings(previous);
+    }
   }
 
-  async function toggleCheckUpdates(next: boolean) {
-    setCheckUpdates(next);
-    await api
-      .setSettings({ keep_vms_running_on_quit: keepRunning ?? false, check_updates: next })
-      .catch(() => setCheckUpdates(!next));
-  }
+  const toggleKeepRunning = (next: boolean) => saveSettings({ keep_vms_running_on_quit: next });
+  const toggleCheckUpdates = (next: boolean) => saveSettings({ check_updates: next });
 
   async function checkNow() {
     setChecking(true);
@@ -291,6 +292,15 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
                 Check for updates once a day (asks GitHub for the latest release)
               </label>
               <span className="spacer" />
+              <select
+                value={appSettings?.update_channel ?? "stable"}
+                disabled={!appSettings}
+                title="Which releases this Mac is offered"
+                onChange={(e) => void saveSettings({ update_channel: e.target.value as AppSettings["update_channel"] })}
+              >
+                <option value="stable">Stable releases</option>
+                <option value="beta">Beta: also release candidates</option>
+              </select>
               <button type="button" disabled={checking} onClick={() => void checkNow()}>
                 {checking ? "Checking…" : "Check now"}
               </button>

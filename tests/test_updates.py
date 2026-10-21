@@ -23,9 +23,13 @@ needs_release = pytest.mark.skipif(not RELEASE_ZIP or not Path(RELEASE_ZIP).is_f
 
 
 def test_versions_compare_as_numbers_and_never_go_back() -> None:
-    assert parse_version("v0.10.0") == (0, 10, 0) and parse_version("v1.2.3-rc1") is None
+    assert parse_version("v0.10.0") > parse_version("v0.9.9")  # type: ignore[operator]
+    assert parse_version("v1.2.3-beta") is None and parse_version("v1.2.3-4-gabc") is None
     assert newer("v0.10.0", "v0.9.9") and newer("v1.0.0", "v0.4.0-3-gabc1234-dirty")
     assert not newer("v0.4.0", "v0.4.0") and not newer("v0.3.9", "v0.4.0") and not newer("nonsense", "v0.4.0")
+    # Release candidates come before their release, in order.
+    assert newer("v0.5.0-rc1", "v0.4.0") and newer("v0.5.0-rc2", "v0.5.0-rc1") and newer("v0.5.0", "v0.5.0-rc2")
+    assert not newer("v0.5.0-rc3", "v0.5.0") and newer("v0.5.0-rc10", "v0.5.0-rc9")
 
 
 def test_the_app_bundle_is_found_from_its_python() -> None:
@@ -51,10 +55,10 @@ def test_a_newer_release_is_found_and_the_answer_is_cached(tmp_path: Path) -> No
         asyncio.run(again.check())
         assert github.requests[-1]["if-none-match"]
 
-        github.publish("v0.3.0")  # older than what runs: nothing to offer
-        assert not asyncio.run(updater(tmp_path / "other", github).check()).available
-        github.publish("v0.6.0-rc1", prerelease=True)
-        assert not asyncio.run(updater(tmp_path / "third", github).check()).available
+        older = FakeGitHub()
+        older.publish("v0.3.0")  # older than what runs: nothing to offer
+        assert not asyncio.run(updater(tmp_path / "other", older).check()).available
+        older.close()
     finally:
         github.close()
 
@@ -203,5 +207,44 @@ def test_anything_not_genuinely_ours_is_refused(tmp_path: Path, case: str, expec
         assert failed.state == "error" and expected in failed.detail, failed.detail
         assert not list(update.directory.glob("v0.4.*/unpacked"))  # nothing kept
         assert (app / "Contents" / "old-version").exists()  # the installed app untouched
+    finally:
+        github.close()
+
+
+def test_the_beta_channel_also_offers_release_candidates(tmp_path: Path) -> None:
+    github = FakeGitHub()
+    try:
+        github.publish("v0.5.0")
+        github.publish("v0.6.0-rc1", prerelease=True, notes="first candidate")
+        github.publish("v0.6.0-rc2", prerelease=True, notes="second candidate")
+        stable = updater(tmp_path / "stable", github)
+        assert asyncio.run(stable.check()).latest == "v0.5.0"  # candidates are not for the stable channel
+
+        beta = updater(tmp_path / "beta", github)
+        beta._settings.update_user_config(["app", "update_channel"], "beta")  # noqa: SLF001
+        found = asyncio.run(beta.check())
+        assert found.channel == "beta" and found.latest == "v0.6.0-rc2" and found.notes == "second candidate"
+
+        github.publish("v0.6.0", notes="final")  # the release itself follows its candidates
+        assert asyncio.run(updater(tmp_path / "beta", github).check()).latest == "v0.6.0"
+
+        # Back on stable after running a candidate: nothing older is offered.
+        on_candidate = updater(tmp_path / "back", github, version="v0.7.0-rc1")
+        assert not asyncio.run(on_candidate.check()).available
+    finally:
+        github.close()
+
+
+def test_switching_the_channel_takes_effect_without_asking_github_again(tmp_path: Path) -> None:
+    github = FakeGitHub()
+    try:
+        github.publish("v0.5.0")
+        github.publish("v0.6.0-rc1", prerelease=True)
+        update = updater(tmp_path, github)
+        asyncio.run(update.check())
+        asked = len(github.requests)
+        assert update.status().latest == "v0.5.0"
+        update._settings.update_user_config(["app", "update_channel"], "beta")  # noqa: SLF001
+        assert update.status().latest == "v0.6.0-rc1" and len(github.requests) == asked
     finally:
         github.close()

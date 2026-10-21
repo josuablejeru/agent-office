@@ -91,7 +91,10 @@ yours, and **Restart to update** quits (shutting agents' computers down as
 usual), swaps the app and opens the new one. The previous version is kept in
 `~/.config/agent-office/updates/previous`. It does not update while an agent is
 working. The check asks GitHub's API for the latest release; switch it off
-under Settings › General. Where `/Applications` cannot be changed (managed
+under Settings › General. There you also choose the channel: **Stable**
+(final releases, the default) or **Beta**, which is also offered release
+candidates (`vX.Y.Z-rcN`, published as GitHub pre-releases) and then the final
+release that follows them. Where `/Applications` cannot be changed (managed
 Macs), the banner links to the download instead. Earlier versions: quit the app, replace it in Applications with the new one and
 open it again. Your agents, their disks and settings live in
 `~/.config/agent-office` and are kept; each agent's computer picks up the new

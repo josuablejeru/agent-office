@@ -90,6 +90,7 @@ export interface DnsStatus {
 export interface AppSettings {
   keep_vms_running_on_quit: boolean;
   check_updates: boolean;
+  update_channel: "stable" | "beta";
 }
 
 export interface ModelStatus {
@@ -150,6 +151,7 @@ export interface UpdateStatus {
   install_note: string;
   checked_at: number;
   dismissed: string;
+  channel: "stable" | "beta";
 }
 
 export interface BaseImageStatus {

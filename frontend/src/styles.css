@@ -1538,3 +1538,9 @@ textarea:focus {
   border-radius: 999px;
   padding: 8px 16px;
 }
+
+.button-link.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}

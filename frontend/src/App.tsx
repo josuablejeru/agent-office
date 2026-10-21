@@ -231,11 +231,15 @@ export function App() {
         {authorized && <UpdateBanner />}
         {authorized && capabilities?.ready && <SetupBanner />}
         {view?.kind === "settings" ? (
+          // Only once signed in: on a reload straight into Settings, its first requests
+          // would otherwise go out before the token is known, and fail.
+          authorized && (
           <SettingsPage
             providers={providers}
             section={view.section}
             onChanged={async () => setProviders(await api.listProviders())}
           />
+          )
         ) : selectedAgent ? (
           <AgentView
             key={selectedAgent.id}

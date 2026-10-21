@@ -40,7 +40,10 @@ export function UpdateBanner() {
   return (
     <div className="notice update">
       <div className="update-text">
-        <strong>Agent Office {status.latest} is available.</strong> You have {status.current}.
+        <strong>
+          Agent Office {status.latest} is available{/-rc\d+$/.test(status.latest) ? " (release candidate)" : ""}.
+        </strong>{" "}
+        You have {status.current}.
         {status.state === "downloading" && (
           <div className="setup-detail">
             Downloading… {Math.round(status.progress * 100)}%{status.detail && ` · ${status.detail}`}

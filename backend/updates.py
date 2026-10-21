@@ -32,7 +32,9 @@ from backend.version import is_release, running_version
 log = get_logger("updates")
 
 REPOSITORY = "josuablejeru/agent-office"
-RELEASES_URL = os.environ.get("AGENT_OFFICE_UPDATE_URL", f"https://api.github.com/repos/{REPOSITORY}/releases/latest")
+# All recent releases: the stable channel takes the newest final one, beta also release candidates.
+RELEASES_URL = os.environ.get("AGENT_OFFICE_UPDATE_URL", f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=30")
+CHANNELS = ("stable", "beta")
 BUNDLE_ID = "com.josuablejeru.agent-office"
 TEAM_ID = "X82QNBM4C4"
 # Apple-anchored, a Developer ID Application certificate (not a development one), this team, this app.
@@ -45,15 +47,38 @@ CHECK_EVERY_SECONDS = 24 * 3600
 FREE_BYTES_NEEDED = 1024**3
 
 
-def parse_version(tag: str) -> tuple[int, int, int] | None:
-    """(major, minor, patch) for a plain release tag like v1.2.3; None for anything else."""
-    found = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag.strip())
-    return (int(found[1]), int(found[2]), int(found[3])) if found else None
+def parse_version(tag: str) -> tuple[int, int, int, int, int] | None:
+    """A sortable key for v1.2.3 or a release candidate v1.2.3-rc4; None for anything else.
+
+    A candidate sorts before its final release: v1.2.3-rc1 < v1.2.3-rc2 < v1.2.3.
+    """
+    found = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?", tag.strip())
+    if not found:
+        return None
+    major, minor, patch = int(found[1]), int(found[2]), int(found[3])
+    return (major, minor, patch, 0, int(found[4])) if found[4] else (major, minor, patch, 1, 0)
+
+
+def is_candidate(tag: str) -> bool:
+    key = parse_version(tag)
+    return key is not None and key[3] == 0
 
 
 def newer(candidate: str, current: str) -> bool:
-    new, old = parse_version(candidate), parse_version(current.split("-")[0])
+    """Whether `candidate` is a later release than `current` (a local build compares by its tag)."""
+    new = parse_version(candidate)
+    old = parse_version(current) or parse_version(current.split("-")[0])
     return new is not None and old is not None and new > old
+
+
+def pick_release(releases: list[dict[str, Any]], channel: str) -> dict[str, Any]:
+    """The newest release a channel offers: final ones only, or on beta also release candidates."""
+    usable = [
+        release for release in releases
+        if not release.get("draft") and parse_version(str(release.get("tag_name", ""))) is not None
+        and (channel == "beta" or not (release.get("prerelease") or is_candidate(str(release.get("tag_name")))))
+    ]
+    return max(usable, key=lambda release: parse_version(str(release["tag_name"])) or (), default={})
 
 
 def bundle_of(executable: str) -> Path | None:
@@ -79,6 +104,7 @@ class UpdateStatus(BaseModel):
     install_note: str = ""
     checked_at: float = 0.0
     dismissed: str = ""
+    channel: str = "stable"
 
 
 def run(*command: str, timeout: float = 120) -> subprocess.CompletedProcess[str]:
@@ -165,7 +191,8 @@ class Updater:
         except (OSError, ValueError):
             state = {}
         self._etag = str(state.get("etag", ""))
-        self._release: dict[str, Any] = state.get("release") or {}
+        self._releases: list[dict[str, Any]] = state.get("releases") or []
+        self._release: dict[str, Any] = {}
         self._status.checked_at = float(state.get("checked_at", 0))
         self._status.dismissed = str(state.get("dismissed", ""))
         self._apply_release()
@@ -173,10 +200,15 @@ class Updater:
     def _save_state(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
         self._state_file().write_text(json.dumps({
-            "etag": self._etag, "release": self._release,
+            "etag": self._etag, "releases": self._releases,
             "checked_at": self._status.checked_at, "dismissed": self._status.dismissed}))
 
+    def channel(self) -> str:
+        chosen = str((self._settings.load_config().get("app") or {}).get("update_channel", "stable"))
+        return chosen if chosen in CHANNELS else "stable"
+
     def _apply_release(self) -> None:
+        self._release = pick_release(self._releases, self.channel())
         tag = str(self._release.get("tag_name", ""))
         self._status.latest = tag
         self._status.available = newer(tag, self.version) if tag else False
@@ -198,6 +230,9 @@ class Updater:
         return None
 
     def status(self) -> UpdateStatus:
+        if self._status.state not in ("downloading", "ready", "installing"):
+            self._apply_release()  # the channel may have been changed in Settings
+        self._status.channel = self.channel()
         problem = self.install_problem()
         self._status.can_install = problem is None
         self._status.install_note = problem or ""
@@ -231,10 +266,11 @@ class Updater:
             if response.status_code == 304:
                 pass  # nothing new since the last check
             elif response.status_code == 200:
-                release = response.json()
-                if release.get("draft") or release.get("prerelease"):
-                    return self._check_failed("the latest release is not final", quiet)
-                self._release = {key: release.get(key) for key in ("tag_name", "body", "published_at", "assets")}
+                listed = response.json()
+                if not isinstance(listed, list):
+                    return self._check_failed("GitHub's answer was not a list of releases", quiet)
+                keep = ("tag_name", "body", "published_at", "assets", "draft", "prerelease")
+                self._releases = [{key: release.get(key) for key in keep} for release in listed[:30]]
                 self._etag = response.headers.get("ETag", "")
             else:
                 return self._check_failed(f"GitHub answered with HTTP {response.status_code}", quiet)
