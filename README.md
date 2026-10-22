@@ -217,6 +217,13 @@ found again on the next start.
 
    See `docs/specs/mcp.md`.
 
+10. **Choosing the model per task.** The switch next to the message box sends
+    the next tasks to another model from your list (Settings › Model
+    providers), or to **Auto**, which picks one per task from routes you
+    describe in plain words and hands over to a stronger model when the first
+    gets stuck. The agent's own model stays the default; each answer shows
+    which model wrote it. See [Models](#models).
+
 ### Characters and photos
 
 The built-in characters are original drawings of generic office roles (the
@@ -277,7 +284,15 @@ Nothing in the app is tied to a particular model.
 - **Vertex AI** setup: Set the project and region in Settings and
   sign in once with `gcloud auth application-default login`. Model ids are
   what Vertex calls them, for example `google/gemini-2.5-pro` for the `vertex`
-  type and a Claude model id for `vertex-anthropic`.
+  type and a Claude model id for `vertex-anthropic`. Once a project is set,
+  the model fields suggest the chat models in Vertex AI's Model Garden (Gemini
+  for `vertex`, Claude for `vertex-anthropic`); a model may still be missing in
+  your region.
+- **Model ids are remembered.** Every model id a provider lists, that passes
+  a Test, that an agent is given or that finishes a task is kept in the
+  database and suggested in every model field, those that worked most
+  recently first. If a provider's listing fails, what is known is still
+  offered.
 - **What the model sees of a web page.** By default the model reads pages as
   text: the page's text and a numbered list of its links, buttons and fields,
   which it acts on by number. Screenshots are stored on the Mac and shown to
@@ -298,6 +313,52 @@ Nothing in the app is tied to a particular model.
 Models differ a great deal in how reliably they use tools. The action list in
 each conversation shows what an agent actually did, independent of what it
 says it did.
+
+### Switching models and Auto
+
+Give the models you use short names under **Settings › Model providers ›
+Models to switch between**; they are stored in `config.yaml`:
+
+    models:
+      - {label: Haiku,  provider: vertex-claude, model: claude-haiku-4-5}
+      - {label: Opus,   provider: vertex-claude, model: claude-opus-5-5}
+      - {label: Gemini, provider: vertex,        model: google/gemini-2.5-pro}
+
+The switch next to an agent's message box then offers the agent's own model
+(the default), these models and, once set up, **Auto**. The choice applies to
+the tasks you send to that agent and is remembered per agent. Each answer shows
+which model wrote it. The agent's fallback model stays behind a switched model.
+
+**Automatic model choice** (same page) routes each task by your description:
+
+    routing:
+      router: Haiku                 # the fast model that picks a route
+      routes:
+        - {when: "Quick questions, lookups and short replies", use: Haiku}
+        - {when: "Coding, spreadsheets, research with many steps", use: Opus}
+      escalate_to: Opus             # optional
+      escalate_after: 3
+
+- **One decision per task**, before it starts, from your own last chat
+  messages. Web pages, tool results and channel posts never reach the router,
+  so they cannot steer it. If the router is unsure, slow (20 s) or fails, the
+  agent's own model is used. A model you pick by hand always wins over Auto.
+- **Escalation.** The chosen model can hand the rest of the task to
+  `escalate_to` itself (it gets a tool for that, which never asks you), and it
+  does so automatically after `escalate_after` failed actions in a row: errors,
+  timeouts and exit codes of 2 or more. Exit code 1, refusals and blocked
+  actions do not count. It happens at most once per task. The stronger model is
+  told what was done so far in one report, which works across providers (Claude
+  to Gemini and back).
+- Answers read "Auto › Opus", with ↑ when the task was handed over; hover for
+  the reason.
+- A model that routing uses cannot be renamed or removed from the list until
+  routing stops using it.
+- Channels keep each agent's own model. An agent that can see the screen
+  needs routes to models that read images.
+
+Why it works this way, and how other tools route between models:
+`docs/specs/model-routing.md`.
 
 Run limits (time waiting for your approval or while you hold control does not
 count):
@@ -442,11 +503,12 @@ runs when unrecognised actions are allowed.
 Everything lives in `~/.config/agent-office/` (or `$XDG_CONFIG_HOME`; override
 with `AGENT_OFFICE_HOME`):
 
-    config.yaml          providers, limits, policy, app settings
-    agent-office.db      agents, conversations, runs, channels
+    config.yaml          providers, models, routing, MCP servers, limits, policy, app settings
+    agent-office.db      agents, conversations, runs, channels, known model ids
     images/              debian-desktop.qcow2, download cache
     agents/<name>/       agent.yaml, disk.qcow2 (incl. the agent's memory and databases),
                          avatar, screenshots/, logs/
+    logs/                mcp-<name>.log: output of MCP command servers
     run/                 control sockets
     secrets/             API token, guest secrets, image login password
 
@@ -476,6 +538,8 @@ To uninstall: delete `/Applications/Agent Office.app`,
 | Building the system image fails with certificate errors | The network inspects secure connections. Add the company's root certificate under Settings › Network › Trusted certificates (IT can provide it, or export it from Keychain Access) and build again, or use "Use an image file…" with an image built on another Mac. |
 | Websites show certificate errors on an agent's computer | As above; then turn the agent's computer off and on so it picks the certificate up. |
 | The app says it is already running | Quit the other copy, or a `start-dev.sh` session |
+| Auto always uses the agent's own model | Hover the model under an answer for the reason: the router model is not in the list, it answered too slowly (a large local model can take over 20 s), or no route fits |
+| An MCP command server "was not found" | The app looks where your terminal does (zsh, bash and fish, including `.zshrc` and `conf.d`). Check `which npx` in a terminal, or give the full path as the command. Its output is in `~/.config/agent-office/logs/mcp-<name>.log` |
 
 API reference: run from source and open http://127.0.0.1:8000/docs.
 
@@ -486,7 +550,14 @@ Pushing a tag publishes a release with the app attached
 
     git tag v0.2.0 && git push origin v0.2.0
 
-A tag with a suffix, such as `v0.2.0-rc1`, becomes a pre-release. The app is
+It runs one job per stage, so the Actions page shows where a release stands:
+Python tests · Lint · UI → Build & sign → Notarize → Publish → Verify download.
+The last job downloads the published release and checks its checksum, version
+and notarization, as the in-app updater will. Run the workflow by hand from
+the Actions tab for a dry run up to Notarize that publishes nothing.
+
+A tag with a suffix, such as `v0.2.0-rc1`, becomes a pre-release, offered only
+to Macs on the Beta update channel. The app is
 signed and notarized when these repository secrets exist, and ad-hoc signed
 otherwise:
 
@@ -517,6 +588,10 @@ Set each with `gh secret set NAME`. To sign a local build the same way:
 | Company root certificates, JFrog Artifactory for pip/npm, hardened base images from Artifactory | working with stand-ins for the company services |
 | Sight: the agent looks at the browser when it chooses to, and clicks by position | working; small local vision models are imprecise about positions |
 | Shared channels, `@mention` hand-offs between agents | working |
+| MCP servers: commands (npx, uvx, local programs) and remote, import from Claude Desktop | working with stand-in and public servers; not tried with company servers |
+| Model switching per task, Auto routing with escalation, remembered model ids | working with stand-ins and a local model; not tried with Claude or Gemini as router |
+| AI-assisted coworkers: job descriptions and drawn avatars | working with a local model |
+| In-app updates with Stable and Beta channels | working; verified with signed releases |
 | Characters with drawn avatars, or a photo of your own | working |
 | Desktop view (noVNC) with take control / return control | working |
 | Providers: any OpenAI-compatible server (Ollama, LM Studio, vLLM, xAI, OpenRouter...) | verified with a local Ollama |

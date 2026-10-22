@@ -101,3 +101,13 @@ The workflow signs and notarizes when these repository secrets exist:
   come from the model; guest replies are validated on the host.
 - Images and credentials never go into the database or logs.
 - Specs live in `docs/specs/` with a status block saying what was checked.
+- Model routing (`backend/agents/routing.py`): the router only ever sees the
+  user's own chat messages, never tool results, web pages or channel posts.
+  When a task moves to another model (escalation, fallback), earlier tool
+  turns go through `flatten_tool_turns` (one report from the user's side):
+  provider-specific data such as Claude thinking blocks or Gemini thought
+  signatures must never reach another model, and written as the model's own
+  turns, models imitate them instead of calling tools.
+- MCP command servers run on the Mac with the user's rights: their "always
+  ask" only ever tightens an agent's MCP level, and their arguments and
+  environment values never go into logs.
