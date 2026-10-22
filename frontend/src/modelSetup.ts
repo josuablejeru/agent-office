@@ -4,21 +4,33 @@ import type { Agent, ModelChoice, RoutingSettings } from "./types";
 
 /** The named models and Auto's routes, shared by every screen that shows a model. */
 export interface ModelSetup {
+  /** Model switching is on (Settings › Models & routing); off, every task uses its agent's own model. */
+  enabled: boolean;
   models: ModelChoice[];
   routing: RoutingSettings | null;
   /** Auto can be used: a model that chooses, and at least one route. */
   autoReady: boolean;
 }
 
-let current: ModelSetup = { models: [], routing: null, autoReady: false };
+let current: ModelSetup = { enabled: false, models: [], routing: null, autoReady: false };
 let loading: Promise<void> | null = null;
 const listeners = new Set<(setup: ModelSetup) => void>();
 
 /** Load again (after Settings saved) and update every screen that uses it. */
 export function refreshModelSetup(): Promise<void> {
-  loading = Promise.all([api.modelChoices().catch(() => []), api.routing().catch(() => null)]).then(
-    ([models, routing]) => {
-      current = { models, routing, autoReady: !!routing && !!routing.router && routing.routes.length > 0 };
+  loading = Promise.all([
+    api.modelSwitching().catch(() => ({ enabled: false })),
+    api.modelChoices().catch(() => []),
+    api.routing().catch(() => null),
+  ]).then(
+    ([switching, models, routing]) => {
+      const enabled = switching.enabled;
+      current = {
+        enabled,
+        models,
+        routing,
+        autoReady: enabled && !!routing && !!routing.router && routing.routes.length > 0,
+      };
       listeners.forEach((listener) => listener(current));
     },
   );

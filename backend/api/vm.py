@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from backend.agents.manager import AgentManager, AgentNotFound
 from backend.agents.models import AgentRead
-from backend.agents.routing import RoutingSettings, load_routing
+from backend.agents.routing import RoutingSettings, load_routing, switching_enabled
 from backend.api.deps import (
     AgentManagerDep,
     BaseImageBuilderDep,
@@ -169,6 +169,23 @@ async def save_models(payload: list[ModelChoice], settings: SettingsDep) -> list
     cleaned = [ModelChoice(label=c.label.strip(), provider=c.provider, model=c.model.strip()) for c in payload]
     settings.update_user_config(["models"], [choice.model_dump() for choice in cleaned])
     return cleaned
+
+
+class ModelSwitching(BaseModel):
+    enabled: bool
+
+
+@router.get("/model-switching")
+async def get_model_switching(settings: SettingsDep) -> ModelSwitching:
+    return ModelSwitching(enabled=switching_enabled(settings))
+
+
+@router.put("/model-switching")
+async def set_model_switching(payload: ModelSwitching, settings: SettingsDep) -> ModelSwitching:
+    """Off: every task uses its agent's own model (no switch, no Auto, no escalation)."""
+    settings.update_user_config(["app", "model_switching"], payload.enabled)
+    log.info("model switching", extra={"enabled": payload.enabled})
+    return payload
 
 
 @router.get("/routing")

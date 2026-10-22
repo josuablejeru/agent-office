@@ -19,6 +19,7 @@ from backend.agents.routing import (
     parse_route,
     router_messages,
 )
+from backend.agents.runtime import RunError
 from backend.db.models import Run
 from backend.providers.anthropic import _assistant_content
 from backend.providers.base import ChatMessage, ModelProvider, ModelResponse, ProviderError, ToolCallRequest
@@ -314,3 +315,38 @@ def test_the_agents_model_choice_is_saved_and_written_to_agent_yaml(tmp_path: Pa
         assert changed.json()["auto_model"] is False
         assert client.patch(f"/api/agents/{created.json()['id']}", json={"system_prompt": "x"}).json()["auto_model"] is False
         assert client.get("/api/routing").json() == {"router": "", "routes": [], "escalate_to": "", "escalate_after": 3}
+
+
+def test_with_model_switching_off_every_task_uses_the_agents_own_model(tmp_path: Path) -> None:
+    router = ScriptedProvider(ModelResponse(text="2"))
+    own = ScriptedProvider(ModelResponse(text="Own model."))
+    service, engine, agent_id = routed_service(tmp_path, {"haiku": router, "opus": ScriptedProvider(), "m": own})
+    set_auto(engine, agent_id, True)
+    service._settings.update_user_config(["app", "model_switching"], False)  # noqa: SLF001
+    run_id = run_once(service, agent_id)  # the agent is set to Auto: ignored while off
+    with pytest.raises(RunError, match="Model switching is off"):
+        service.start(agent_id, "x", provider="ollama", model="opus")
+    with pytest.raises(RunError, match="Model switching is off"):
+        service.start(agent_id, "x", auto=True)
+    assert router.requests == [] and len(own.requests) == 1
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        assert run is not None and not run.auto and run.model is None
+
+
+def test_model_switching_is_off_unless_chosen_or_models_were_named(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.config import Settings
+    from backend.keystore import KeyStore
+    from backend.main import create_app
+    from tests.test_agents_api import FakeKeychain
+
+    app = create_app(Settings(home=tmp_path / "home"), key_store=KeyStore(run=FakeKeychain()))
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        client.headers["Authorization"] = f"Bearer {app.state.api_token}"
+        assert client.get("/api/model-switching").json() == {"enabled": False}  # a new install
+        client.put("/api/models", json=MODELS)
+        assert client.get("/api/model-switching").json() == {"enabled": True}  # set up before the setting existed
+        assert client.put("/api/model-switching", json={"enabled": False}).json() == {"enabled": False}
+        assert client.get("/api/model-switching").json() == {"enabled": False}  # the choice wins

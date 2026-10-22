@@ -1756,3 +1756,8 @@ textarea:focus {
   font-weight: 600;
   color: var(--muted);
 }
+
+.switching-toggle {
+  font-weight: 600;
+  margin: 4px 0;
+}

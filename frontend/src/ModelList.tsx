@@ -312,3 +312,46 @@ export function ModelOverview() {
     </div>
   );
 }
+
+
+/** Settings › Models & routing: the on/off switch, and while on, everything it covers. */
+export function ModelSwitchingSettings({ providers }: { providers: Provider[] }) {
+  const setup = useModelSetup();
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(enabled: boolean) {
+    setError(null);
+    try {
+      await api.setModelSwitching(enabled);
+      await refreshModelSetup();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <>
+      <label className="toggle switching-toggle">
+        <input type="checkbox" checked={setup.enabled} onChange={(e) => void toggle(e.target.checked)} />
+        Let agents use different models
+      </label>
+      {error && <p className="form-error">{error}</p>}
+      {setup.enabled ? (
+        <>
+          <p className="hint">
+            On: pick a model per task next to the message box, let <b>Auto</b> choose by your routes, and hand stuck
+            tasks to a stronger model.
+          </p>
+          <ModelOverview />
+          <ModelList providers={providers} />
+        </>
+      ) : (
+        <p className="hint">
+          Off: every task uses its agent&apos;s own model, set in the agent&apos;s settings. No model switch next to the
+          message box, no Auto, no hand-overs. Switch it on to name the models you use and let tasks go to the right
+          one: quick jobs to a fast model, hard ones to a strong one.
+        </p>
+      )}
+    </>
+  );
+}

@@ -26,7 +26,8 @@
 >   - an agent switched to Auto in its settings, then shown as "Auto" in the list and the header;
 >   - the chat switch offering "Auto (default)" and the agent's own model;
 >   - a chat task routed by default, and one sent to the agent's own model on request;
->   - a channel post answered through Auto.
+>   - a channel post answered through Auto;
+>   - the on/off switch: off hid the routes, the chat switch and the agent's Auto setting, and a task by an agent set to Auto went to its own model without asking the router. On again brought everything back.
 >
 > Not checked:
 > - Model Garden with real Google credentials. A Vertex provider is listed only once it has a project; listings fail quietly. One check by hand on 22 Oct did reach Google with the developer's credentials (HTTP 403, read-only) before this guard and the test-wide credential block existed.
@@ -69,6 +70,10 @@ to a stronger one when the first gets stuck.
   - Answers show "Auto › model", with ↑ when escalated and the reason on hover.
 - The agent's fallback now also receives history as text, for the same reason.
 
+- **An on/off switch** (`app.model_switching`, Settings › Models & routing, 22 Oct): off by default. Off means
+  every task uses its agent's own model: no chat switch, no Auto, no escalation. The server refuses a model
+  choice or Auto while it is off, so nothing reaches past it. If the setting was never chosen, it is on when
+  models were already named, so earlier setups keep working after the update.
 - **Shown everywhere a model is chosen or used** (22 Oct):
   - Settings › Models & routing (named models, routes, and an overview of which agent uses what);
   - an agent's settings (one-click picks, and "Tasks use: This model / Auto", stored as `auto_model` and as `model_choice` in `agent.yaml`);

@@ -345,41 +345,43 @@ export function AgentForm({
             ))}
           </div>
         )}
-        <div className="tasks-use">
-          <span className="field-label">Tasks use</span>
-          <div className="segmented" role="radiogroup" aria-label="Tasks use">
-            <button type="button" role="radio" aria-checked={!form.auto_model} onClick={() => set("auto_model", false)}>
-              This model
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={form.auto_model}
-              disabled={!setup.autoReady && !form.auto_model}
-              onClick={() => set("auto_model", true)}
-            >
-              Auto
-            </button>
+        {setup.enabled && (
+          <div className="tasks-use">
+            <span className="field-label">Tasks use</span>
+            <div className="segmented" role="radiogroup" aria-label="Tasks use">
+              <button type="button" role="radio" aria-checked={!form.auto_model} onClick={() => set("auto_model", false)}>
+                This model
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={form.auto_model}
+                disabled={!setup.autoReady && !form.auto_model}
+                onClick={() => set("auto_model", true)}
+              >
+                Auto
+              </button>
+            </div>
+            {!setup.autoReady ? (
+              <span className="hint">
+                Auto picks a model per task from routes you describe. Set it up under{" "}
+                <a href="#/settings/routing" onClick={onClose}>
+                  Settings › Models &amp; routing
+                </a>
+                .
+              </span>
+            ) : form.auto_model ? (
+              <span className="hint">
+                Each task (in the chat and in channels) goes to the model its route names:{" "}
+                {setup.routing?.routes.map((route) => `${route.when} → ${route.use}`).join("; ")}.
+                {setup.routing?.escalate_to ? ` Stuck tasks go to ${setup.routing.escalate_to}.` : ""} The model above
+                is used when Auto is unsure and for hand-offs from colleagues.
+              </span>
+            ) : (
+              <span className="hint">Every task uses the model above. You can still pick another one per task in the chat.</span>
+            )}
           </div>
-          {!setup.autoReady ? (
-            <span className="hint">
-              Auto picks a model per task from routes you describe. Set it up under{" "}
-              <a href="#/settings/routing" onClick={onClose}>
-                Settings › Models &amp; routing
-              </a>
-              .
-            </span>
-          ) : form.auto_model ? (
-            <span className="hint">
-              Each task (in the chat and in channels) goes to the model its route names:{" "}
-              {setup.routing?.routes.map((route) => `${route.when} → ${route.use}`).join("; ")}.
-              {setup.routing?.escalate_to ? ` Stuck tasks go to ${setup.routing.escalate_to}.` : ""} The model above
-              is used when Auto is unsure and for hand-offs from colleagues.
-            </span>
-          ) : (
-            <span className="hint">Every task uses the model above. You can still pick another one per task in the chat.</span>
-          )}
-        </div>
+        )}
         <label>
           Job description
           <textarea

@@ -21,6 +21,7 @@ from tests.test_runs import ScriptedProvider, make_service
 def test_a_task_runs_on_the_chosen_model_and_the_next_on_the_agents_own(tmp_path: Path) -> None:
     built: list[tuple[str, str]] = []
     service, engine, agent_id = make_service(tmp_path, ScriptedProvider())
+    service._settings.update_user_config(["app", "model_switching"], True)  # noqa: SLF001
 
     def factory(name: str, config: Any, model: str) -> Any:
         built.append((name, model))
@@ -59,6 +60,7 @@ def test_the_agents_fallback_stays_behind_a_switched_model(tmp_path: Path) -> No
 
 def test_a_switch_needs_a_known_provider_and_both_halves(tmp_path: Path) -> None:
     service, _, agent_id = make_service(tmp_path, ScriptedProvider())
+    service._settings.update_user_config(["app", "model_switching"], True)  # noqa: SLF001
     with pytest.raises(RunError, match="no provider 'nope'"):
         service.start(agent_id, "x", provider="nope", model="m")
     with pytest.raises(RunError, match="both"):

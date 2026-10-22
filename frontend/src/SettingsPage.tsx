@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { McpServers } from "./McpServers";
-import { ModelList, ModelOverview } from "./ModelList";
+import { ModelSwitchingSettings } from "./ModelList";
 import { ModelTest } from "./ModelTest";
 import { PackageRepositorySettings } from "./PackageRepository";
 import type { AppSettings, DnsStatus, Provider, UpdateStatus } from "./types";
@@ -398,8 +398,7 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
         {section === "routing" && (
           <>
             <h3>Models &amp; routing</h3>
-            <ModelOverview />
-            <ModelList providers={providers} />
+            <ModelSwitchingSettings providers={providers} />
           </>
         )}
         {section === "mcp" && (

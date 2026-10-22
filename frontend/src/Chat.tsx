@@ -89,16 +89,17 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
   const bottom = useRef<HTMLDivElement>(null);
   // The model for the next tasks: "" is the agent's default (its own model, or Auto when it is
   // set to Auto), AUTO or OWN the other of those two, otherwise a name from Settings.
-  const { models, autoReady } = useModelSetup();
+  const { enabled, models, autoReady } = useModelSetup();
   const [chosen, setChosen] = useState(() => rememberedModel(agent.id));
   useEffect(() => setChosen(rememberedModel(agent.id)), [agent.id]);
   const agentAuto = agent.auto_model && autoReady;
   const ownName = modelName(models, agent.provider, agent.model);
   const isDefault = (model: ModelChoice) => model.provider === agent.provider && model.model === agent.model;
   // Anything that no longer applies (a removed name, Auto no longer set up) means the default.
-  const explicitAuto = chosen === AUTO && autoReady && !agentAuto;
-  const explicitOwn = chosen === OWN && agentAuto;
-  const choice = models.find((model) => model.label === chosen && !isDefault(model)) ?? null;
+  // Switched off in Settings: nothing chosen here applies.
+  const explicitAuto = enabled && chosen === AUTO && autoReady && !agentAuto;
+  const explicitOwn = enabled && chosen === OWN && agentAuto;
+  const choice = (enabled && models.find((model) => model.label === chosen && !isDefault(model))) || null;
   const auto = explicitAuto || (agentAuto && !explicitOwn && !choice);
   const choose = (label: string) => {
     setChosen(label);
@@ -260,7 +261,7 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKey}
         />
-        {models.length > 0 && (
+        {enabled && models.length > 0 && (
           <select
             className="model-switch"
             aria-label="Model for this task"

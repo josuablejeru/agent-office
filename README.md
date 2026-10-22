@@ -217,8 +217,9 @@ found again on the next start.
 
    See `docs/specs/mcp.md`.
 
-10. **Choosing the model.** Under Settings › Models & routing, give the
-    models you use short names and, if you like, describe routes for **Auto**,
+10. **Choosing the model.** Every agent uses its own model. To let tasks
+    use different models, switch on **Let agents use different models** under
+    Settings › Models & routing. Then give the models you use short names and, if you like, describe routes for **Auto**,
     which picks a model per task and hands over to a stronger one when the
     first gets stuck. In an agent's settings, pick its model with one click and
     choose whether its tasks use that model or Auto, in the chat and in
@@ -318,9 +319,18 @@ says it did.
 
 ### Switching models and Auto
 
-Everything about choosing models is under **Settings › Models & routing**. It
-starts with an overview of which agent uses which model or Auto. Give the
-models you use short names there; they are stored in `config.yaml`:
+Everything about choosing models is under **Settings › Models & routing**, and
+it is off until you switch on **Let agents use different models** (in
+`config.yaml`: `app.model_switching`). While it is off, every task uses its
+agent's own model: there is no switch next to the message box, no Auto (agents
+set to Auto use their own model) and no hand-over to a stronger model. Model
+id suggestions, an agent's fallback model and the one-click picks in its
+settings work either way. An installation that already had named models
+before this setting existed starts with it on.
+
+When it is on, the page starts with an overview of which agent uses which
+model or Auto. Give the models you use short names there; they are stored in
+`config.yaml`:
 
     models:
       - {label: Haiku,  provider: vertex-claude, model: claude-haiku-4-5}

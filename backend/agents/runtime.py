@@ -27,6 +27,7 @@ from backend.agents.routing import (
     find,
     load_routing,
     model_list,
+    switching_enabled,
 )
 from backend.agents.tools import (
     ENVIRONMENT_NOTE,
@@ -239,6 +240,10 @@ class RunService:
             raise RunError("This agent is already working on a message.")
         if (provider is None) != (model is None):
             raise RunError("Choose both a provider and a model.")
+        if not switching_enabled(self._settings):
+            if provider is not None or auto:
+                raise RunError("Model switching is off (Settings › Models & routing): tasks use the agent's own model.")
+            auto = False  # an agent set to Auto uses its own model while switching is off
         if provider is not None and provider not in self._settings.load_providers():
             raise RunError(f"There is no provider '{provider}'.")
         with Session(self._engine) as session:

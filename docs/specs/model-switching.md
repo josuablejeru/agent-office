@@ -22,6 +22,8 @@ editing an agent each time.
 **Outcome:** one click next to the message box sends the next task to another model.
 
 ## What is in
+- **Off until switched on** under Settings › Models & routing ("Let agents use different models"); see
+  `model-routing.md`.
 - **Settings › Models & routing › Models to switch between:** short names for models you use
   (*Haiku*, *Opus*, *Gemini Flash*), each with a provider, a model ID (suggested from the
   provider where it can list them) and Test. Stored in `config.yaml` under `models`.

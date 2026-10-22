@@ -72,6 +72,19 @@ def model_list(settings: Settings) -> list[ModelRef]:
     return found
 
 
+def switching_enabled(settings: Settings) -> bool:
+    """Whether model switching (the chat's switch, Auto, escalation) is on.
+
+    `app.model_switching` in config.yaml. Not set: on only for those who had
+    already named models (it came switched on before the setting existed).
+    """
+    config = settings.load_config()
+    chosen = (config.get("app") or {}).get("model_switching")
+    if isinstance(chosen, bool):
+        return chosen
+    return bool(config.get("models"))
+
+
 def load_routing(settings: Settings) -> RoutingSettings:
     try:
         return RoutingSettings.model_validate(settings.load_config().get("routing") or {})

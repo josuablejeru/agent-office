@@ -208,6 +208,9 @@ export const api = {
               : { content },
       ),
     ),
+  modelSwitching: () => request<{ enabled: boolean }>("/api/model-switching"),
+  setModelSwitching: (enabled: boolean) =>
+    request<{ enabled: boolean }>("/api/model-switching", { method: "PUT", body: JSON.stringify({ enabled }) }),
   routing: () => request<RoutingSettings>("/api/routing"),
   saveRouting: (routing: RoutingSettings) =>
     request<RoutingSettings>("/api/routing", { method: "PUT", body: JSON.stringify(routing) }),
