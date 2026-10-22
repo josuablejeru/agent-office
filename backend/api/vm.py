@@ -154,6 +154,14 @@ async def save_models(payload: list[ModelChoice], settings: SettingsDep) -> list
     labels = [choice.label.strip().lower() for choice in payload]
     if len(set(labels)) != len(labels):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Give each model its own name.")
+    routing = load_routing(settings)
+    kept = set(labels)
+    for label in [routing.router, routing.escalate_to, *(route.use for route in routing.routes)]:
+        if label and label.strip().lower() not in kept:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"'{label}' is used by Automatic model choice: change it there first.",
+            )
     providers = settings.load_providers()
     for choice in payload:
         if choice.provider not in providers:
@@ -492,8 +500,10 @@ async def list_provider_models(name: str, settings: SettingsDep, keys: KeyStoreD
     try:
         config = providers[name]
         if config.type in VERTEX_TYPES:
-            publisher = "anthropic" if config.type == "vertex-anthropic" else "google"
-            listed = await list_publisher_models(publisher, config.project)
+            # Not before a project is set: an unconfigured provider must not reach Google.
+            if config.project:
+                publisher = "anthropic" if config.type == "vertex-anthropic" else "google"
+                listed = await list_publisher_models(publisher, config.project)
         else:
             listed = await build_provider(name, config, "", keys.get).list_models()
     except (ProviderError, httpx.HTTPError, ValueError) as exc:

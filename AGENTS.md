@@ -37,6 +37,11 @@ AGENT_OFFICE_E2E=1 AGENT_OFFICE_E2E_MODEL=ollama/qwen3:8b uv run pytest tests/e2
   `AGENT_OFFICE_HOME=<scratch dir>` and symlink the base image into it.
 - Never write test certificates into the user's keychain, and never use the
   user's Google Cloud credentials.
+  `tests/conftest.py` hides them from every test. A backend started by hand
+  for a check (a scratch server for a UI walk-through) needs the same:
+  `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent CLOUDSDK_CONFIG=<empty dir>`.
+  Opening Settings lists every provider's models, which for Vertex AI asks
+  Google.
 - `scripts/build-app.sh` installs into `/Applications`; with `INSTALL_DIR=` it
   only builds into `dist/`. Check that the app is not running first.
 - Write test runs to their own logs, not `~/Library/Logs/agent-office.log`.

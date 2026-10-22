@@ -92,12 +92,15 @@ def test_refusals_never_count_as_failures() -> None:
         return ChatMessage(role="tool", content=json.dumps(content), tool_call_id="x")
 
     failed = result({"error": "connection reset"})
-    exit_1 = result({"exit_code": 1, "stderr": "no such file"})
+    exit_2 = result({"exit_code": 2, "stderr": "no such file"})
+    no_match = result({"exit_code": 1, "stdout": ""})  # grep found nothing: an answer
+    timed_out = result({"exit_code": -1, "timed_out": True})
     rejected = result({"error": "The user rejected this action. Do not retry it; ask how to proceed."})
     blocked = result({"error": "This action was blocked by policy: rm -rf"})
     ok = result({"exit_code": 0})
     call = ChatMessage(role="assistant", tool_calls=[shell(1)])
-    assert failures_in_a_row([call, failed, call, exit_1, call, failed]) == 3
+    assert failures_in_a_row([call, failed, call, exit_2, call, timed_out]) == 3
+    assert failures_in_a_row([call, failed, call, no_match]) == 0
     assert failures_in_a_row([call, failed, call, rejected, call, blocked]) == 0
     assert failures_in_a_row([call, failed, call, ok]) == 0
 
@@ -115,9 +118,12 @@ def test_flattened_tool_turns_suit_both_message_formats() -> None:
         ChatMessage(role="tool", content='{"error": "boom"}', tool_call_id="t3"),
     ]
     flat = flatten_tool_turns(history)
-    assert [m.role for m in flat] == ["system", "user", "assistant", "user", "assistant", "user"]
+    # The task, then one report from the user's side: no assistant turns a model could imitate.
+    assert [m.role for m in flat] == ["system", "user"]
     assert not any(m.tool_calls or m.provider_data or m.tool_call_id or m.images for m in flat)
-    assert "echo try 1" in flat[2].content and "screenshot" in flat[3].content and "boom" in flat[5].content
+    report = flat[1].content
+    assert report.startswith("list files") and "done on this task so far" in report
+    assert "echo try 1" in report and "screenshot" in report and "boom" in report and "Continue the task" in report
     wire = json.dumps(to_wire_messages(flat))
     assert "tool_calls" not in wire and "thought_signature" not in wire
     claude_turns = json.dumps([_assistant_content(m) for m in flat if m.role == "assistant"])
@@ -169,7 +175,7 @@ def test_a_model_chosen_by_hand_wins_over_auto(tmp_path: Path) -> None:
 class FailingGuest(FakeGuest):
     async def call(self, op: str, args: dict[str, Any] | None = None, timeout: float = 30.0) -> dict[str, Any]:
         self.calls.append(op)
-        return {"exit_code": 1, "stderr": "not found"}
+        return {"exit_code": 2, "stderr": "not found"}
 
 
 def test_after_three_failed_actions_the_stronger_model_takes_over_once(tmp_path: Path) -> None:
@@ -183,8 +189,8 @@ def test_after_three_failed_actions_the_stronger_model_takes_over_once(tmp_path:
     assert len(haiku.requests) == 1 + 3
     assert len(opus.requests) == 5
     first = opus.requests[0]
-    assert not any(m.tool_calls or m.role == "tool" for m in first)  # Haiku's turns as text
-    assert "echo try 3" in " ".join(m.content for m in first)
+    assert not any(m.tool_calls or m.role in ("tool", "assistant") for m in first)  # Haiku's turns as a report
+    assert "echo try 3" in first[-1].content
     assert ESCALATE_TOOL not in {t.name for t in opus.tools_seen[0]}
     with Session(engine) as session:
         run = session.get(Run, run_id)
@@ -233,4 +239,6 @@ def test_routing_settings_must_name_models_from_the_list(tmp_path: Path) -> None
         assert client.put("/api/routing", json={**ROUTING, "router": ""}).status_code == 400
         assert client.put("/api/routing", json=ROUTING).status_code == 200
         assert client.get("/api/routing").json()["escalate_to"] == "Opus"
+        renamed = client.put("/api/models", json=[MODELS[0], {**MODELS[1], "label": "Opus 5"}])
+        assert renamed.status_code == 400 and "used by Automatic model choice" in renamed.text
         assert [m.label for m in model_list(app.state.settings)] == ["Haiku", "Opus"]

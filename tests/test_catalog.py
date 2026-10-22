@@ -84,3 +84,20 @@ def test_model_garden_lists_a_publishers_chat_models(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(403)), **kw))
     with pytest.raises(vertex.ProviderError, match="403"):
         asyncio.run(vertex.list_publisher_models("anthropic", None, token))
+
+
+def test_an_unconfigured_vertex_provider_never_reaches_google(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    from backend.api import vm as vm_api
+
+    called: list[str] = []
+
+    async def listing(publisher: str, *_: Any, **__: Any) -> list[str]:
+        called.append(publisher)
+        return ["gemini-2.5-pro"]
+
+    monkeypatch.setattr(vm_api, "list_publisher_models", listing)
+    assert client.get("/api/providers/vertex/models").json() == []
+    assert called == []  # no project yet: Google is not asked
+    client.put("/api/providers/vertex/location", json={"project": "my-project", "region": "eu"})
+    assert client.get("/api/providers/vertex/models").json() == ["gemini-2.5-pro"]
+    assert called == ["google"]

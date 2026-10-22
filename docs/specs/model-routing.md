@@ -16,8 +16,13 @@
 >   - a quick question went to Haiku, three real commands failed on the agent's computer, and Opus finished the task;
 >   - each answer was labelled, with the reason on hover.
 >
+> - With the local `qwen3:8b` (real model, no Google):
+>   - the router chose as expected for 4 of 4 requests, taking 8 to 14 s each, so a slow local router model can hit the 20 s limit and fall back;
+>   - after three failed actions, the escalated model made real tool calls in 10 of 10 tries. Before the history was told as one report, it imitated the earlier turns as text in 2 of 5.
+> - A database from v0.5.0-rc1 opens: new columns are added, and old runs and messages read correctly.
+>
 > Not checked:
-> - Model Garden with real Google credentials (never used in tests). It fails quietly and the catalog still works.
+> - Model Garden with real Google credentials. A Vertex provider is listed only once it has a project; listings fail quietly. One check by hand on 22 Oct did reach Google with the developer's credentials (HTTP 403, read-only) before this guard and the test-wide credential block existed.
 > - Real Claude/Gemini as router and routed models.
 > - Escalating between Claude and Gemini against the real APIs. Handled by turning earlier tool turns into text, which only the stand-in has seen.
 
@@ -46,13 +51,14 @@ to a stronger one when the first gets stuck.
   from the list; the model that chooses; and optionally a model to escalate to after N failed
   actions in a row (default 3).
 - **Auto** in the chat's model switch:
-  - One routing decision per task, made before it starts, from your last few messages only. Web pages, files and tool results are never shown to the router, so they can't steer it.
+  - One routing decision per task, made before it starts, from your last few chat messages only. Channel posts, web pages, files and tool results are never shown to the router, so they can't steer it.
+  - A model that routing uses can't be renamed or removed from the list until routing stops using it.
   - Any doubt means the agent's own model.
   - A model chosen by hand always wins.
 - **Escalation:**
   - The routed model gets an `ask_for_stronger_model` tool. It's a harmless operation: never an approval, never blocked.
-  - Escalation also happens automatically after N failed actions in a row. Refused or blocked actions don't count.
-  - At most once per task. The stronger model sees what happened so far as text, which works across providers (Claude thinking blocks and Gemini thought signatures stay with the model that made them).
+  - Escalation also happens automatically after N failed actions in a row: errors, timeouts and exit codes of 2 or more. Exit code 1 doesn't count (grep found nothing, test said no), and neither do refused or blocked actions.
+  - At most once per task. The stronger model is told what happened so far in one report from the user's side, which works across providers (Claude thinking blocks and Gemini thought signatures stay with the model that made them) and which models don't imitate.
   - Answers show "Auto › model", with ↑ when escalated and the reason on hover.
 - The agent's fallback now also receives history as text, for the same reason.
 

@@ -493,9 +493,13 @@ class RunService:
                     raise ProviderError(f"provider '{name}' is not defined")
                 return self._provider_factory(name, providers[name], model)
 
+            # The user's own earlier requests in this chat: not tasks from channels,
+            # where colleagues' posts can quote web pages.
             earlier = session.exec(
                 select(Message.content)
-                .where(Message.agent_id == agent.id, Message.role == "user", Message.run_id != run.id)
+                .join(Run, Run.id == Message.run_id)  # type: ignore[arg-type]
+                .where(Message.agent_id == agent.id, Message.role == "user", Message.run_id != run.id,
+                       Run.channel_id.is_(None))  # type: ignore[union-attr]
                 .order_by(Message.id.desc())  # type: ignore[union-attr]
                 .limit(2)
             ).all()

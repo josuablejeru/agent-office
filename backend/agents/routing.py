@@ -156,8 +156,11 @@ def is_failure(message: ChatMessage) -> bool:
     error = str(result.get("error") or "")
     if error:
         return not error.startswith(NOT_FAILURES)
+    if result.get("timed_out"):
+        return True
+    # Exit code 1 is often an answer, not a failure: grep found nothing, test said no, diff saw a difference.
     code = result.get("exit_code")
-    return isinstance(code, int) and code != 0
+    return isinstance(code, int) and code >= 2
 
 
 def failures_in_a_row(messages: list[ChatMessage]) -> int:
