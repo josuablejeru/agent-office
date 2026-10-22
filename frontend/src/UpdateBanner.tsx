@@ -76,9 +76,28 @@ export function UpdateBanner() {
               Restart to update
             </button>
           ) : (
-            <button className="primary" disabled={busy} onClick={() => act(api.downloadUpdate)}>
-              {status.state === "downloading" ? "Downloading…" : status.state === "installing" ? "Restarting…" : "Update"}
-            </button>
+            <>
+              {status.state === "error" && (
+                <a
+                  className="button-link"
+                  href={`https://github.com/josuablejeru/agent-office/releases/tag/${status.latest}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Download it in your browser and install it by hand"
+                >
+                  Download from GitHub
+                </a>
+              )}
+              <button className="primary" disabled={busy} onClick={() => act(api.downloadUpdate)}>
+                {status.state === "downloading"
+                  ? "Downloading…"
+                  : status.state === "installing"
+                    ? "Restarting…"
+                    : status.state === "error"
+                      ? "Try again"
+                      : "Update"}
+              </button>
+            </>
           )
         ) : (
           <a

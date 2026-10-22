@@ -64,11 +64,35 @@ def is_candidate(tag: str) -> bool:
     return key is not None and key[3] == 0
 
 
+LOCAL_BUILD_SUFFIX = re.compile(r"-\d+-g[0-9a-f]+(-dirty)?$|-dirty$")
+
+
 def newer(candidate: str, current: str) -> bool:
-    """Whether `candidate` is a later release than `current` (a local build compares by its tag)."""
+    """Whether `candidate` is a later release than `current`.
+
+    A local build (v0.5.0-rc2-3-gabc1234) compares as the release it was built
+    on: v0.5.0-rc2, not v0.5.0, so later candidates are still newer.
+    """
     new = parse_version(candidate)
-    old = parse_version(current) or parse_version(current.split("-")[0])
+    old = parse_version(current) or parse_version(LOCAL_BUILD_SUFFIX.sub("", current.strip()))
     return new is not None and old is not None and new > old
+
+
+def describe_download_error(error: Exception, url: str) -> str:
+    """A failed download in words, naming the host: on company networks it is often blocked."""
+    host = httpx.URL(url).host
+    try:
+        host = error.request.url.host  # GitHub redirects downloads to another host: name the one that failed
+    except (AttributeError, RuntimeError):
+        pass
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"{host} answered with HTTP {error.response.status_code}"
+    if isinstance(error, httpx.TimeoutException):
+        return f"{host} did not answer in time ({type(error).__name__})"
+    if isinstance(error, httpx.HTTPError):
+        reason = " ".join(str(error).split())[:200]
+        return f"{host} could not be reached ({type(error).__name__}{': ' + reason if reason else ''})"
+    return f"{type(error).__name__}: {error}"
 
 
 def pick_release(releases: list[dict[str, Any]], channel: str) -> dict[str, Any]:
@@ -105,6 +129,14 @@ class UpdateStatus(BaseModel):
     checked_at: float = 0.0
     dismissed: str = ""
     channel: str = "stable"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for block in iter(lambda: file.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def run(*command: str, timeout: float = 120) -> subprocess.CompletedProcess[str]:
@@ -319,18 +351,20 @@ class Updater:
             target.mkdir(parents=True)
             archive = target / zip_name
             async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-                expected = (await client.get(sum_url)).text.split()[0].lower()
-                async with client.stream("GET", zip_url) as response:
-                    response.raise_for_status()
-                    total = int(response.headers.get("Content-Length") or 0)
-                    digest, received = hashlib.sha256(), 0
-                    with archive.open("wb") as file:
-                        async for chunk in response.aiter_bytes(1 << 20):
-                            file.write(chunk)
-                            digest.update(chunk)
-                            received += len(chunk)
-                            self._status.progress = received / total if total else 0.0
-            if digest.hexdigest() != expected:
+                current_url = sum_url
+                try:
+                    checksum = await client.get(sum_url)
+                    checksum.raise_for_status()
+                    expected = (checksum.text.split() or [""])[0].lower()
+                    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                        # A proxy's error page, not a checksum.
+                        raise RuntimeError(f"{httpx.URL(sum_url).host} did not send a checksum")
+                    current_url = zip_url
+                    await self._fetch(client, zip_url, archive)
+                except httpx.HTTPError as exc:
+                    raise RuntimeError(f"the download failed: {describe_download_error(exc, current_url)}") from exc
+            digest = await asyncio.to_thread(_sha256, archive)
+            if digest != expected:
                 raise RuntimeError("the download is damaged (its checksum does not match)")
             self._status.detail = "Checking the download…"
             unpack = await asyncio.to_thread(run, "ditto", "-x", "-k", str(archive), str(target / "unpacked"))
@@ -348,6 +382,17 @@ class Updater:
             shutil.rmtree(target, ignore_errors=True)
             self._status.state, self._status.detail = "error", f"Update failed: {exc}"
             log.warning("update failed", extra={"version": tag, "error": str(exc)[:300]})
+
+    async def _fetch(self, client: httpx.AsyncClient, url: str, archive: Path) -> None:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("Content-Length") or 0)
+            received = 0
+            with archive.open("wb") as file:
+                async for chunk in response.aiter_bytes(1 << 20):
+                    file.write(chunk)
+                    received += len(chunk)
+                    self._status.progress = received / total if total else 0.0
 
     # --- installing ----------------------------------------------------------------------
 

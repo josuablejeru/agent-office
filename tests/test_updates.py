@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -246,5 +247,45 @@ def test_switching_the_channel_takes_effect_without_asking_github_again(tmp_path
         assert update.status().latest == "v0.5.0"
         update._settings.update_user_config(["app", "update_channel"], "beta")  # noqa: SLF001
         assert update.status().latest == "v0.6.0-rc1" and len(github.requests) == asked
+    finally:
+        github.close()
+
+
+def test_a_local_build_compares_as_the_release_it_was_built_on() -> None:
+    # Built after rc2: rc3 and the final release are newer, rc2 itself is not.
+    assert newer("v0.5.0-rc3", "v0.5.0-rc2-1-g7105c17") and newer("v0.5.0", "v0.5.0-rc2-4-gabc1234-dirty")
+    assert not newer("v0.5.0-rc2", "v0.5.0-rc2-1-g7105c17")
+    assert newer("v0.5.1", "v0.5.0-3-gabc1234") and not newer("v0.5.0", "v0.5.0-3-gabc1234")
+
+
+@pytest.mark.parametrize(
+    ("break_it", "expected"),
+    [
+        ("proxy page", "did not send a checksum"),
+        ("zip refused", "the download failed: 127.0.0.1 answered with HTTP 404"),
+        ("host blocked", "the download failed: 127.0.0.1 could not be reached (ConnectError"),
+    ],
+)
+def test_a_failed_download_says_which_host_and_why(tmp_path: Path, break_it: str, expected: str) -> None:
+    github = FakeGitHub()
+    app = installed_app(tmp_path)
+    try:
+        github.publish("v0.4.1", b"not really a zip")
+        assets = github.releases[-1]["assets"]
+        if break_it == "proxy page":
+            github.files["Agent-Office-0.4.1-macos-arm64.zip.sha256"] = b"<html><body>Blocked by policy</body></html>"
+        elif break_it == "zip refused":
+            assets[0]["browser_download_url"] += "-gone"
+        else:
+            with socket.socket() as probe:  # a port nothing listens on
+                probe.bind(("127.0.0.1", 0))
+                closed = probe.getsockname()[1]
+            assets[0]["browser_download_url"] = f"http://127.0.0.1:{closed}/asset.zip"
+        update = updater(tmp_path, github, version="v0.4.0", launcher_pid=1,
+                         executable=str(app / "Contents" / "Resources" / "python" / "bin" / "python3.12"))
+        update.quit_app = lambda: None
+        failed = asyncio.run(download(update))
+        assert failed.state == "error" and expected in failed.detail, failed.detail
+        assert not list(update.directory.glob("v0.4.1/*"))  # nothing half-downloaded is kept
     finally:
         github.close()
