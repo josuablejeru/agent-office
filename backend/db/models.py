@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -89,6 +90,25 @@ class Run(SQLModel, table=True):
     model: str | None = None
     started_at: datetime = Field(default_factory=utcnow)
     finished_at: datetime | None = None
+
+
+class KnownModel(SQLModel, table=True):
+    """A model ID seen to exist for a provider: listed by it, tested, chosen or used.
+
+    Suggested wherever a model ID is typed, so it never has to be typed twice.
+    """
+
+    __tablename__ = "known_models"
+    __table_args__ = (UniqueConstraint("provider", "model"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    provider: str = Field(index=True)
+    model: str
+    # "listed" (the provider said so), "tested", "chosen" (an agent's model) or "used".
+    source: str = "listed"
+    seen_at: datetime = Field(default_factory=utcnow)
+    # Last time it worked (a passing Test or a finished task): those come first.
+    worked_at: datetime | None = None
 
 
 class Channel(SQLModel, table=True):

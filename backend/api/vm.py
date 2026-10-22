@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
@@ -16,6 +17,7 @@ from backend.api.deps import (
     BaseImageBuilderDep,
     KeyStoreDep,
     RunServiceDep,
+    SessionDep,
     SettingsDep,
     VMManagerDep,
 )
@@ -24,9 +26,15 @@ from backend.keystore import KeyStoreError
 from backend.logging_config import get_logger
 from backend.net import packages
 from backend.providers.base import ProviderError
+from backend.providers.catalog import known, remember
 from backend.providers.check import ModelCheck, check_model
 from backend.providers.registry import build_provider
-from backend.providers.vertex import LOGIN_HINT, credentials_available, credentials_summary
+from backend.providers.vertex import (
+    LOGIN_HINT,
+    credentials_available,
+    credentials_summary,
+    list_publisher_models,
+)
 from backend.updates import UpdateStatus
 from backend.version import is_release, running_version
 from backend.vm.base_image import BaseImageStatus
@@ -184,7 +192,7 @@ async def set_provider_key(
 
 @router.post("/providers/{name}/test")
 async def test_provider(
-    name: str, payload: ModelTestRequest, settings: SettingsDep, keys: KeyStoreDep
+    name: str, payload: ModelTestRequest, settings: SettingsDep, keys: KeyStoreDep, session: SessionDep
 ) -> ModelCheck:
     """Send one small request through the same path agents use and report what happened."""
     provider = settings.load_providers().get(name)
@@ -195,6 +203,9 @@ async def test_provider(
     except ProviderError as exc:
         return ModelCheck(ok=False, detail=str(exc))
     result = await check_model(instance)
+    if result.ok:
+        remember(session, name, payload.model, "tested", worked=True)
+        session.commit()
     log.info(
         "provider tested",
         extra={"provider": name, "model": payload.model, "ok": result.ok, "tools": result.tools},
@@ -451,15 +462,27 @@ async def build_base_image(builder: BaseImageBuilderDep) -> BaseImageStatus:
 
 
 @router.get("/providers/{name}/models")
-async def list_provider_models(name: str, settings: SettingsDep, keys: KeyStoreDep) -> list[str]:
+async def list_provider_models(name: str, settings: SettingsDep, keys: KeyStoreDep, session: SessionDep) -> list[str]:
     """Models the provider offers, for populating the model picker."""
     providers = settings.load_providers()
     if name not in providers:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"provider '{name}' not found")
+    listed: list[str] = []
     try:
-        return await build_provider(name, providers[name], "", keys.get).list_models()
-    except ProviderError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+        config = providers[name]
+        if config.type in VERTEX_TYPES:
+            publisher = "anthropic" if config.type == "vertex-anthropic" else "google"
+            listed = await list_publisher_models(publisher, config.project)
+        else:
+            listed = await build_provider(name, config, "", keys.get).list_models()
+    except (ProviderError, httpx.HTTPError, ValueError) as exc:
+        # Suggestions only: what is already known still helps.
+        log.info("model listing failed", extra={"provider": name, "reason": str(exc)[:200]})
+    for model in listed:
+        remember(session, name, model, "listed")
+    session.commit()
+    seen = known(session, name)
+    return seen + [model for model in listed if model not in seen]
 
 
 class GuestStatus(BaseModel):

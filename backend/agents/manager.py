@@ -15,6 +15,7 @@ from backend.config import Settings
 from backend.db.models import Agent, Approval, Message, Run, ToolCall
 from backend.logging_config import get_logger
 from backend.policy.permissions import permissions_of, store_permissions
+from backend.providers.catalog import remember
 from backend.vm.ports import allocate_daemon_port, is_port_free
 
 log = get_logger("agents")
@@ -88,12 +89,18 @@ class AgentManager:
         agent = Agent(**fields, vm_disk_path=str(agent_dir / "disk.qcow2"), mcp_servers_json=json.dumps(servers))
         store_permissions(agent, levels)
         (agent_dir / "logs").mkdir(parents=True)
+        self._remember_models(agent)
         self._session.add(agent)
         self._session.commit()
         self._session.refresh(agent)
         self._write_yaml(agent, agent_dir)
         log.info("agent created", extra={"agent": agent.name, "provider": agent.provider})
         return agent
+
+    def _remember_models(self, agent: Agent) -> None:
+        remember(self._session, agent.provider, agent.model, "chosen")
+        if agent.fallback_provider and agent.fallback_model:
+            remember(self._session, agent.fallback_provider, agent.fallback_model, "chosen")
 
     def update(self, agent_id: int, payload: AgentUpdate) -> Agent:
         agent = self.get(agent_id)
@@ -115,6 +122,7 @@ class AgentManager:
             setattr(agent, key, value)
         if levels:
             store_permissions(agent, levels)
+        self._remember_models(agent)
         self._session.add(agent)
         self._session.commit()
         self._session.refresh(agent)

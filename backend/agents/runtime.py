@@ -37,6 +37,7 @@ from backend.policy.approvals import ApprovalBroker
 from backend.policy.engine import PolicyEngine
 from backend.policy.permissions import group_of, permissions_of, unknown_action_of
 from backend.providers.base import ChatMessage, ModelProvider, ProviderError, ToolCallRequest, ToolSpec
+from backend.providers.catalog import remember
 from backend.providers.registry import FallbackProvider, build_provider
 from backend.vm.errors import VMError
 from backend.vm.guest import GuestClient
@@ -629,6 +630,8 @@ class RunService:
         run.error = error
         run.finished_at = utcnow()
         session.add(run)
+        if status == "completed":
+            remember(session, run.provider or agent.provider, run.model or agent.model, "used", worked=True)
         session.commit()
         log.info("run finished", extra={"run": run.id, "agent": agent.name, "status": status})
         if status != "cancelled":  # the user stopped it themselves: nothing to tell them

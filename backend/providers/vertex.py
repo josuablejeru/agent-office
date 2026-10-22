@@ -139,6 +139,44 @@ def vertex_model_id(model: str) -> str:
     )
 
 
+MODEL_GARDEN = "https://aiplatform.googleapis.com/v1beta1/publishers/{publisher}/models"
+# Which of a publisher's models can chat: not embeddings, image or speech models.
+CHAT_PREFIXES = {"google": ("gemini",), "anthropic": ("claude",)}
+
+
+async def list_publisher_models(
+    publisher: str, project: str | None, token_source: TokenSource | None = None, timeout: float = 15.0
+) -> list[str]:
+    """The chat models Vertex AI's Model Garden offers from a publisher (google, anthropic).
+
+    The OpenAI-compatible endpoint cannot list models; Model Garden can. The
+    list is global, so a model may still be missing in a given region.
+    """
+    import httpx
+
+    token = await (token_source or GoogleTokenSource())()
+    headers = {"Authorization": f"Bearer {token}"}
+    if project:
+        headers["x-goog-user-project"] = project  # bill the listing to the user's project
+    found: set[str] = set()
+    page = ""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for _ in range(10):
+            params = {"pageSize": "100", **({"pageToken": page} if page else {})}
+            response = await client.get(MODEL_GARDEN.format(publisher=publisher), headers=headers, params=params)
+            if response.status_code >= 400:
+                raise ProviderError(f"Model Garden answered HTTP {response.status_code} for {publisher}")
+            body = response.json()
+            for entry in body.get("publisherModels") or []:
+                model = str(entry.get("name", "")).rsplit("/", 1)[-1]
+                if model.startswith(CHAT_PREFIXES.get(publisher, ("",))):
+                    found.add(model)
+            page = body.get("nextPageToken") or ""
+            if not page:
+                break
+    return sorted(found)
+
+
 class VertexProvider(OpenAICompatibleProvider):
     """Gemini (and other Vertex-hosted models) via Vertex's OpenAI-compatible endpoint."""
 

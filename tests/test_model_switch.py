@@ -42,6 +42,9 @@ def test_a_task_runs_on_the_chosen_model_and_the_next_on_the_agents_own(tmp_path
         assert first is not None and second is not None
         assert (first.provider, first.model, first.status) == ("ollama", "big-model", "completed")
         assert (second.provider, second.model) == (None, None)  # back on the agent's own model
+        from backend.providers.catalog import known
+
+        assert set(known(session, "ollama")) >= {"big-model", "m"}  # both worked: remembered
 
 
 def test_the_agents_fallback_stays_behind_a_switched_model(tmp_path: Path) -> None:
