@@ -6,6 +6,7 @@ import { Chat } from "./Chat";
 import { Computer } from "./Computer";
 import { Files } from "./Files";
 import { MemoryPanel } from "./MemoryPanel";
+import { modelName, useModelSetup } from "./modelSetup";
 import type { Agent, Provider } from "./types";
 
 const VM_LABELS: Record<Agent["vm_status"], string> = {
@@ -25,6 +26,7 @@ interface Props {
 }
 
 export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, onChanged }: Props) {
+  const modelSetup = useModelSetup();
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [guestReady, setGuestReady] = useState(false);
@@ -98,8 +100,17 @@ export function AgentView({ agent, providers, avatarVersion, onAvatarChanged, on
         <div className="agent-title">
           <Avatar avatar={agent.avatar} agentId={agent.id} size={34} version={avatarVersion} />
           <h1>{agent.name}</h1>
-          <span className="model-chip" title="Model used for this agent">
-            {agent.model} · {agent.provider}
+          <span
+            className="model-chip"
+            title={
+              agent.auto_model && modelSetup.autoReady
+                ? `Auto picks the model per task; its own model: ${agent.model} (${agent.provider})`
+                : `${agent.model} · ${agent.provider}`
+            }
+          >
+            {agent.auto_model && modelSetup.autoReady
+              ? `Auto · ${modelName(modelSetup.models, agent.provider, agent.model)} when unsure`
+              : `${modelName(modelSetup.models, agent.provider, agent.model)} · ${agent.provider}`}
           </span>
           <span className={`status-chip ${running && guestReady ? "on" : ""}`}>{status}</span>
         </div>

@@ -36,6 +36,8 @@ class Agent(SQLModel, table=True):
     unknown_action: str = "default"
     # The model is shown screenshots of the browser (and may click by position).
     vision_enabled: bool = False
+    # Tasks go to the model Auto (routing) chooses, instead of the agent's own model.
+    auto_model: bool = False
     # Names of the MCP servers (Settings › MCP servers) this agent may use, as a JSON list.
     mcp_servers_json: str = ""
     vm_image: str = "debian-desktop"

@@ -5,7 +5,8 @@ import remarkGfm from "remark-gfm";
 import { api } from "./api";
 import { ApprovalModal } from "./ApprovalModal";
 import { Screenshot } from "./Screenshot";
-import { modelName, rememberModel, rememberedModel } from "./ModelList";
+import { rememberModel, rememberedModel } from "./ModelList";
+import { modelName, useModelSetup } from "./modelSetup";
 import type { Agent, Message, ModelChoice, Run, ToolCall } from "./types";
 
 const RUN_POLL_MS = 1000;
@@ -74,6 +75,7 @@ function ToolCalls({ agentId, calls }: { agentId: number; calls: ToolCall[] }) {
 }
 
 const AUTO = "__auto__";
+const OWN = "__own__";
 
 export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
   // A run can start without this chat sending anything: a channel mention, or a
@@ -85,25 +87,19 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  // The model for the next task: "" is the agent's own, otherwise a name from Settings.
-  const [models, setModels] = useState<ModelChoice[]>([]);
-  const [autoReady, setAutoReady] = useState(false);
+  // The model for the next tasks: "" is the agent's default (its own model, or Auto when it is
+  // set to Auto), AUTO or OWN the other of those two, otherwise a name from Settings.
+  const { models, autoReady } = useModelSetup();
   const [chosen, setChosen] = useState(() => rememberedModel(agent.id));
-  useEffect(() => {
-    void api
-      .modelChoices()
-      .then(setModels)
-      .catch(() => setModels([]));
-    void api
-      .routing()
-      .then((routing) => setAutoReady(!!routing.router && routing.routes.length > 0))
-      .catch(() => setAutoReady(false));
-  }, []);
   useEffect(() => setChosen(rememberedModel(agent.id)), [agent.id]);
-  // A name that was since removed in Settings falls back to the agent's own model.
-  const auto = chosen === AUTO && autoReady;
-  const choice = auto ? null : (models.find((model) => model.label === chosen) ?? null);
+  const agentAuto = agent.auto_model && autoReady;
+  const ownName = modelName(models, agent.provider, agent.model);
   const isDefault = (model: ModelChoice) => model.provider === agent.provider && model.model === agent.model;
+  // Anything that no longer applies (a removed name, Auto no longer set up) means the default.
+  const explicitAuto = chosen === AUTO && autoReady && !agentAuto;
+  const explicitOwn = chosen === OWN && agentAuto;
+  const choice = models.find((model) => model.label === chosen && !isDefault(model)) ?? null;
+  const auto = explicitAuto || (agentAuto && !explicitOwn && !choice);
   const choose = (label: string) => {
     setChosen(label);
     rememberModel(agent.id, label);
@@ -156,7 +152,7 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
       const { run_id } = await api.sendMessage(
         agent.id,
         content,
-        auto ? "auto" : choice && !isDefault(choice) ? choice : null,
+        explicitAuto ? "auto" : explicitOwn ? "own" : choice,
       );
       setDraft("");
       await load();
@@ -186,7 +182,16 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
             <h2>What should {agent.name} do?</h2>
             <p>
               It has its own computer with a shell, files and a Chrome browser, and thinks with{" "}
-              <strong>{agent.model}</strong> via {agent.provider}.
+              {auto ? (
+                <>
+                  the model <strong>Auto</strong> picks for each task
+                </>
+              ) : (
+                <>
+                  <strong>{choice ? choice.label : ownName}</strong> via {choice ? choice.provider : agent.provider}
+                </>
+              )}
+              .
             </p>
           </div>
         )}
@@ -260,12 +265,12 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
             className="model-switch"
             aria-label="Model for this task"
             title="Model for the tasks you send"
-            value={auto ? AUTO : choice ? choice.label : ""}
+            value={explicitAuto ? AUTO : explicitOwn ? OWN : choice ? choice.label : ""}
             disabled={activeRun !== null}
             onChange={(e) => choose(e.target.value)}
           >
-            <option value="">{modelName(models, agent.provider, agent.model)} (default)</option>
-            {autoReady && <option value={AUTO}>Auto</option>}
+            <option value="">{agentAuto ? "Auto" : ownName} (default)</option>
+            {agentAuto ? <option value={OWN}>{ownName}</option> : autoReady && <option value={AUTO}>Auto</option>}
             {models
               .filter((model) => !isDefault(model))
               .map((model) => (
@@ -293,7 +298,7 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
       </form>
       <div className="composer-foot">
         {auto
-          ? "Auto picks the model for each task (Settings › Model providers)."
+          ? "Auto picks the model for each task (Settings › Models & routing)."
           : `Requests go to ${choice ? choice.provider : agent.provider} (${choice ? choice.model : agent.model}).`}{" "}
         Actions run on the agent&apos;s own computer.
       </div>

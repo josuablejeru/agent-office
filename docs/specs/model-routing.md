@@ -21,6 +21,13 @@
 >   - after three failed actions, the escalated model made real tool calls in 10 of 10 tries. Before the history was told as one report, it imitated the earlier turns as text in 2 of 5.
 > - A database from v0.5.0-rc1 opens: new columns are added, and old runs and messages read correctly.
 >
+> - In the app's window type, with a real agent computer (22 Oct):
+>   - the Models & routing section and its overview;
+>   - an agent switched to Auto in its settings, then shown as "Auto" in the list and the header;
+>   - the chat switch offering "Auto (default)" and the agent's own model;
+>   - a chat task routed by default, and one sent to the agent's own model on request;
+>   - a channel post answered through Auto.
+>
 > Not checked:
 > - Model Garden with real Google credentials. A Vertex provider is listed only once it has a project; listings fail quietly. One check by hand on 22 Oct did reach Google with the developer's credentials (HTTP 403, read-only) before this guard and the test-wide credential block existed.
 > - Real Claude/Gemini as router and routed models.
@@ -62,8 +69,18 @@ to a stronger one when the first gets stuck.
   - Answers show "Auto › model", with ↑ when escalated and the reason on hover.
 - The agent's fallback now also receives history as text, for the same reason.
 
+- **Shown everywhere a model is chosen or used** (22 Oct):
+  - Settings › Models & routing (named models, routes, and an overview of which agent uses what);
+  - an agent's settings (one-click picks, and "Tasks use: This model / Auto", stored as `auto_model` and as `model_choice` in `agent.yaml`);
+  - the agent list and the agent's page ("Auto", or the model's name);
+  - the chat switch (the agent's default first);
+  - each answer.
+
+  Agents set to Auto also route channel tasks that the user started; the router reads only the user's post.
+
 ## What is out (on purpose)
-- **Channels** keep each agent's own model: no routing there yet.
+- **Hand-offs between agents** in channels use the agent's own model: their text can quote web
+  pages, and the router must only read the user's own words.
 - **Vision:** if Auto picks a model that cannot read images for an agent that can see, that call
   fails. Route such agents' tasks to models that can see.
 - **A routing decision per step** (instead of per task): it would defeat provider-side caching

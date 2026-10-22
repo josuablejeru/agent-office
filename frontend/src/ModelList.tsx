@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { modelName, refreshModelSetup, useModelSetup } from "./modelSetup";
 import { ModelTest } from "./ModelTest";
-import type { ModelChoice, Provider, RoutingSettings } from "./types";
+import type { Agent, ModelChoice, Provider, RoutingSettings } from "./types";
 
 /** Settings › Model providers: the models you switch between, under short names. */
 export function ModelList({ providers }: { providers: Provider[] }) {
@@ -41,6 +42,7 @@ export function ModelList({ providers }: { providers: Provider[] }) {
       const stored = await api.saveModelChoices(rows.filter((row) => row.label.trim() || row.model.trim()));
       setRows(stored);
       setSaved(JSON.stringify(stored));
+      void refreshModelSetup();
       setMessage({ ok: true, text: "Saved. Choose them next to an agent's message box." });
     } catch (err) {
       setMessage({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -165,7 +167,8 @@ function Routing({ models }: { models: ModelChoice[] }) {
       const stored = await api.saveRouting(cleaned);
       setRouting(stored);
       setSaved(JSON.stringify(stored));
-      setMessage({ ok: true, text: "Saved. Choose Auto next to an agent's message box." });
+      void refreshModelSetup();
+      setMessage({ ok: true, text: "Saved. Set agents to Auto in their settings, or choose Auto next to the message box." });
     } catch (err) {
       setMessage({ ok: false, text: err instanceof Error ? err.message : String(err) });
     }
@@ -260,7 +263,52 @@ export function rememberModel(agentId: number, label: string) {
   }
 }
 
-/** The name a run's model goes by in the list, or its ID. */
-export function modelName(models: ModelChoice[], provider: string, model: string): string {
-  return models.find((choice) => choice.provider === provider && choice.model === model)?.label ?? model;
+export { modelName };
+
+
+/** At the top of Settings › Models & routing: which agent uses what, and what Auto does. */
+export function ModelOverview() {
+  const setup = useModelSetup();
+  const [agents, setAgents] = useState<Agent[]>([]);
+  useEffect(() => {
+    void api
+      .listAgents()
+      .then(setAgents)
+      .catch(() => setAgents([]));
+  }, []);
+  const routing = setup.routing;
+  return (
+    <div className="model-overview">
+      <p className="hint">
+        {setup.autoReady && routing
+          ? `Auto is on: ${routing.router} picks one of ${routing.routes.length} route${routing.routes.length === 1 ? "" : "s"} per task` +
+            (routing.escalate_to ? `, and stuck tasks go to ${routing.escalate_to}.` : ".")
+          : "Auto is not set up yet: name your models and describe routes below."}{" "}
+        Each agent uses its own model or Auto (set in its settings); the switch next to the message box overrides that
+        for the tasks you send.
+      </p>
+      {agents.length > 0 && (
+        <table className="model-table">
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Its own model</th>
+              <th>Tasks use</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agents.map((agent) => (
+              <tr key={agent.id}>
+                <td>
+                  <a href={`#/agents/${agent.id}`}>{agent.name}</a>
+                </td>
+                <td title={`${agent.provider} · ${agent.model}`}>{modelName(setup.models, agent.provider, agent.model)}</td>
+                <td>{agent.auto_model ? (setup.autoReady ? "Auto" : "Auto (not set up: its own model)") : "Its own model"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }

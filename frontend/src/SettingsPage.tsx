@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { McpServers } from "./McpServers";
-import { ModelList } from "./ModelList";
+import { ModelList, ModelOverview } from "./ModelList";
 import { ModelTest } from "./ModelTest";
 import { PackageRepositorySettings } from "./PackageRepository";
 import type { AppSettings, DnsStatus, Provider, UpdateStatus } from "./types";
 
-export type SettingsSection = "general" | "network" | "packages" | "models" | "mcp";
+export type SettingsSection = "general" | "network" | "packages" | "models" | "routing" | "mcp";
 
 export const SETTINGS_SECTIONS: [SettingsSection, string][] = [
   ["general", "General"],
   ["network", "Network"],
   ["packages", "Package repository"],
   ["models", "Model providers"],
+  ["routing", "Models & routing"],
   ["mcp", "MCP servers"],
 ];
 
@@ -394,6 +395,13 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
 
           </>
         )}
+        {section === "routing" && (
+          <>
+            <h3>Models &amp; routing</h3>
+            <ModelOverview />
+            <ModelList providers={providers} />
+          </>
+        )}
         {section === "mcp" && (
           <>
             <h3>MCP servers</h3>
@@ -416,7 +424,10 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
           ),
         )}
         <AddProvider onChanged={onChanged} />
-        <ModelList providers={providers} />
+        <p className="hint">
+          Short names for the models you use, switching per task and automatic model choice are under{" "}
+          <a href="#/settings/routing">Models &amp; routing</a>.
+        </p>
           </>
         )}
       </div>

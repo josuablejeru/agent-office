@@ -194,15 +194,18 @@ export const api = {
       body: JSON.stringify({ project, region }),
     }),
   listMessages: (id: number) => request<Message[]>(`/api/agents/${id}/messages`),
-  sendMessage: (id: number, content: string, choice?: ModelChoice | "auto" | null) =>
+  /** `choice`: a model, "auto", "own" (the agent's own model), or nothing for the agent's default. */
+  sendMessage: (id: number, content: string, choice?: ModelChoice | "auto" | "own" | null) =>
     request<{ run_id: number }>(
       `/api/agents/${id}/chat`,
       post(
         choice === "auto"
           ? { content, auto: true }
-          : choice
-            ? { content, provider: choice.provider, model: choice.model }
-            : { content },
+          : choice === "own"
+            ? { content, auto: false }
+            : choice
+              ? { content, provider: choice.provider, model: choice.model }
+              : { content },
       ),
     ),
   routing: () => request<RoutingSettings>("/api/routing"),

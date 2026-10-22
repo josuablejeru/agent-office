@@ -47,6 +47,8 @@ def agent_to_yaml_dict(agent: Agent) -> dict[str, Any]:
             "cpus": agent.vm_cpus,
         },
         "model": {"provider": agent.provider, "model": agent.model},
+        # auto: tasks go to the model routing chooses; the model above when it is unsure.
+        "model_choice": "auto" if agent.auto_model else "own",
     }
     if agent.fallback_provider and agent.fallback_model:
         data["fallback_model"] = {
@@ -109,7 +111,7 @@ class AgentManager:
         servers = changes.pop("mcp_servers", None)
         if servers is not None:
             agent.mcp_servers_json = json.dumps(sorted(set(servers)))
-        for optional in ("unknown_action", "vision_enabled"):
+        for optional in ("unknown_action", "vision_enabled", "auto_model"):
             if optional in changes and changes[optional] is None:
                 del changes[optional]
         # The older on/off switches, when sent alone, still mean what they say.

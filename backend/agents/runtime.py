@@ -180,6 +180,8 @@ class RunService:
         self._provider_factory = provider_factory
         self._client_factory = client_factory
         self._tasks: dict[int, asyncio.Task[None]] = {}
+        # What the router may read for an Auto run, when it is not the task text itself.
+        self._route_inputs: dict[int, str] = {}
         # Channel messages being offered to agents in turn.
         self._background: set[asyncio.Future[None]] = set()
         # Per agent: set while the agent may act, cleared during manual control.
@@ -223,12 +225,15 @@ class RunService:
 
     def start(
         self, agent_id: int, content: str, channel_id: int | None = None, hops: int = 0,
-        provider: str | None = None, model: str | None = None, auto: bool = False,
+        provider: str | None = None, model: str | None = None, auto: bool | None = None,
+        route_text: str | None = None,
     ) -> int:
         """Store the user message and run the agent in the background. Returns the run id.
 
         `provider` and `model` switch this one task to another model; by default
-        the agent's own is used.
+        the agent's own is used. `auto` asks routing to choose (by default: the
+        agent's own setting); `route_text` is what the router may read, when it
+        is not the task itself (only the user's own words, never colleagues' posts).
         """
         if self.is_busy(agent_id):
             raise RunError("This agent is already working on a message.")
@@ -237,8 +242,11 @@ class RunService:
         if provider is not None and provider not in self._settings.load_providers():
             raise RunError(f"There is no provider '{provider}'.")
         with Session(self._engine) as session:
-            # A model chosen by hand wins over Auto.
-            auto = auto and provider is None
+            if auto is None:
+                agent = session.get(Agent, agent_id)
+                auto = bool(agent and agent.auto_model)
+            # A model chosen by hand wins over Auto, and so does having nothing the router may read.
+            auto = auto and provider is None and (channel_id is None or bool(route_text))
             run = Run(agent_id=agent_id, channel_id=channel_id, hops=hops, provider=provider, model=model, auto=auto)
             session.add(run)
             session.commit()
@@ -247,6 +255,8 @@ class RunService:
             session.add(Message(agent_id=agent_id, run_id=run.id, role="user", content=content))
             session.commit()
             run_id = run.id
+        if auto:
+            self._route_inputs[run_id] = route_text or content
         task = asyncio.create_task(self._execute(run_id, content))
         task.add_done_callback(lambda _task: self._after_run(agent_id))
         self._tasks[agent_id] = task
@@ -315,7 +325,8 @@ class RunService:
                     "nothing is posted.\n\n"
                     f"Recent messages in #{channel.name}:\n{transcript}"
                 )
-                self.start(agent.id, task, channel_id=message.channel_id, hops=hops + 1)
+                self.start(agent.id, task, channel_id=message.channel_id, hops=hops + 1,
+                           route_text=message.content if message.author == HUMAN_AUTHOR else None)
                 log.info("agent woken by mention", extra={"agent": name, "channel": channel.name, "hops": hops})
 
     async def _mcp_tools(self, agent: Agent) -> tuple[list[AgentTool], dict[str, HostHandler]]:
@@ -385,7 +396,8 @@ class RunService:
                 f"{PASS_WORD} and nothing is posted.\n\n"
                 f"Recent messages in #{channel.name}:\n{transcript}"
             )
-            self.start(agent.id, task, channel_id=message.channel_id, hops=1)
+            self.start(agent.id, task, channel_id=message.channel_id, hops=1,
+                       route_text=message.content if message.author == HUMAN_AUTHOR else None)
             log.info("channel message offered", extra={"agent": agent.name, "channel": channel.name})
             await self.wait(agent.id)
             if any(row.author == agent.name and row.id > (message.id or 0)
@@ -495,15 +507,18 @@ class RunService:
 
             # The user's own earlier requests in this chat: not tasks from channels,
             # where colleagues' posts can quote web pages.
-            earlier = session.exec(
-                select(Message.content)
-                .join(Run, Run.id == Message.run_id)  # type: ignore[arg-type]
-                .where(Message.agent_id == agent.id, Message.role == "user", Message.run_id != run.id,
-                       Run.channel_id.is_(None))  # type: ignore[union-attr]
-                .order_by(Message.id.desc())  # type: ignore[union-attr]
-                .limit(2)
-            ).all()
-            choice, why = await choose_model(routing, model_list(self._settings), [*reversed(earlier), task], build)
+            request = self._route_inputs.pop(run.id or 0, task)
+            earlier: list[str] = []
+            if run.channel_id is None:
+                earlier = list(session.exec(
+                    select(Message.content)
+                    .join(Run, Run.id == Message.run_id)  # type: ignore[arg-type]
+                    .where(Message.agent_id == agent.id, Message.role == "user", Message.run_id != run.id,
+                           Run.channel_id.is_(None))  # type: ignore[union-attr]
+                    .order_by(Message.id.desc())  # type: ignore[union-attr]
+                    .limit(2)
+                ).all())
+            choice, why = await choose_model(routing, model_list(self._settings), [*reversed(earlier), request], build)
             if choice is not None:
                 run.provider, run.model = choice.provider, choice.model
                 run.route_note = f"Auto chose {choice.label} for {why}"

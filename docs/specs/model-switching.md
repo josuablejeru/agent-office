@@ -22,7 +22,7 @@ editing an agent each time.
 **Outcome:** one click next to the message box sends the next task to another model.
 
 ## What is in
-- **Settings › Model providers › Models to switch between:** short names for models you use
+- **Settings › Models & routing › Models to switch between:** short names for models you use
   (*Haiku*, *Opus*, *Gemini Flash*), each with a provider, a model ID (suggested from the
   provider where it can list them) and Test. Stored in `config.yaml` under `models`.
 - **Next to the message box:** the agent's own model (default) and the list. The choice applies to
@@ -32,6 +32,6 @@ editing an agent each time.
 - The agent's fallback model stays behind a switched model.
 
 ## What is out (on purpose)
-- **Channels** keep each agent's own model. A channel has no switch.
+- **Channels** have no switch: an agent's own setting (its model or Auto) applies there.
 - **The agent choosing its model itself** (routing by difficulty) comes later, once it's clear which
   jobs go to which model.

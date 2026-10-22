@@ -25,6 +25,8 @@ export interface Agent {
   permissions: Record<string, Level>;
   unknown_action: UnknownAction;
   vision_enabled: boolean;
+  /** Tasks go to the model Auto chooses instead of this agent's own. */
+  auto_model: boolean;
   mcp_servers: string[];
   vm_memory_mb: number;
   vm_cpus: number;
@@ -44,6 +46,8 @@ export interface AgentCreate {
   permissions: Record<string, Level>;
   unknown_action: UnknownAction;
   vision_enabled: boolean;
+  /** Tasks go to the model Auto chooses instead of this agent's own. */
+  auto_model: boolean;
   mcp_servers: string[];
   vm_memory_mb: number;
   vm_cpus: number;

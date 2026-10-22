@@ -217,12 +217,14 @@ found again on the next start.
 
    See `docs/specs/mcp.md`.
 
-10. **Choosing the model per task.** The switch next to the message box sends
-    the next tasks to another model from your list (Settings › Model
-    providers), or to **Auto**, which picks one per task from routes you
-    describe in plain words and hands over to a stronger model when the first
-    gets stuck. The agent's own model stays the default; each answer shows
-    which model wrote it. See [Models](#models).
+10. **Choosing the model.** Under Settings › Models & routing, give the
+    models you use short names and, if you like, describe routes for **Auto**,
+    which picks a model per task and hands over to a stronger one when the
+    first gets stuck. In an agent's settings, pick its model with one click and
+    choose whether its tasks use that model or Auto, in the chat and in
+    channels. The switch next to the message box overrides this for the tasks
+    you send. The agent list, the agent's page and each answer show which model
+    is used. See [Models](#models).
 
 ### Characters and photos
 
@@ -316,18 +318,25 @@ says it did.
 
 ### Switching models and Auto
 
-Give the models you use short names under **Settings › Model providers ›
-Models to switch between**; they are stored in `config.yaml`:
+Everything about choosing models is under **Settings › Models & routing**. It
+starts with an overview of which agent uses which model or Auto. Give the
+models you use short names there; they are stored in `config.yaml`:
 
     models:
       - {label: Haiku,  provider: vertex-claude, model: claude-haiku-4-5}
       - {label: Opus,   provider: vertex-claude, model: claude-opus-5-5}
       - {label: Gemini, provider: vertex,        model: google/gemini-2.5-pro}
 
-The switch next to an agent's message box then offers the agent's own model
-(the default), these models and, once set up, **Auto**. The choice applies to
-the tasks you send to that agent and is remembered per agent. Each answer shows
-which model wrote it. The agent's fallback model stays behind a switched model.
+In an agent's settings these names are one-click picks for its model, and
+**Tasks use** says whether its tasks go to that model or to **Auto** (in
+`agent.yaml`: `model_choice: own` or `auto`). The agent list and the agent's
+page show the model's name, or "Auto".
+
+The switch next to an agent's message box offers the agent's default (its own
+model or Auto), the other of the two, and the named models. The choice applies
+to the tasks you send to that agent and is remembered per agent. Each answer
+shows which model wrote it. The agent's fallback model stays behind a switched
+model.
 
 **Automatic model choice** (same page) routes each task by your description:
 
@@ -354,8 +363,10 @@ which model wrote it. The agent's fallback model stays behind a switched model.
   the reason.
 - A model that routing uses cannot be renamed or removed from the list until
   routing stops using it.
-- Channels keep each agent's own model. An agent that can see the screen
-  needs routes to models that read images.
+- In channels, an agent set to Auto routes tasks you start with your own post;
+  the router reads only that post, never the rest of the channel. Hand-offs
+  from colleagues (`@name` from another agent) use the agent's own model.
+- An agent that can see the screen needs routes to models that read images.
 
 Why it works this way, and how other tools route between models:
 `docs/specs/model-routing.md`.

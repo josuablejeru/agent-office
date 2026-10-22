@@ -58,6 +58,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     # Optional decision provider for ambiguous tool calls (see README). Example:
     #   jev: {base_url: "https://...", api_key_env: JEV_API_KEY}
+    # Short names for models to switch between (Settings › Models & routing):
+    #   - {label: Opus, provider: vertex-claude, model: claude-opus-5-5}
+    "models": [],
+    # Automatic model choice (see README, Switching models and Auto).
+    "routing": {"router": "", "routes": [], "escalate_to": "", "escalate_after": 3},
     "limits": {
         "max_tool_calls_per_run": 50,
         "max_runtime_seconds": 900,

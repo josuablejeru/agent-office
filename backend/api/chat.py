@@ -36,7 +36,8 @@ class ChatRequest(BaseModel):
     provider: str | None = Field(default=None, max_length=63)
     model: str | None = Field(default=None, max_length=200)
     # Let routing choose the model (Settings › Model providers › Automatic model choice).
-    auto: bool = False
+    # None: as the agent is set up (its own model, or Auto).
+    auto: bool | None = None
 
 
 class ChatStarted(BaseModel):

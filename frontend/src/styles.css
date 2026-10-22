@@ -1711,3 +1711,48 @@ textarea:focus {
 .inline-field input[type="number"] {
   width: 64px;
 }
+
+.model-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.model-picks .pick {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+}
+
+.model-picks .pick.on {
+  border-color: var(--text);
+  font-weight: 600;
+}
+
+.tasks-use {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin: 4px 0 8px;
+}
+
+.model-table th,
+.model-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-table th {
+  font-weight: 600;
+  color: var(--muted);
+}

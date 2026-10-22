@@ -3,6 +3,7 @@ import { api } from "./api";
 import { Avatar } from "./Avatar";
 import { Permissions } from "./Permissions";
 import { DrawWithAi, WriteWithAi } from "./AiAssist";
+import { useModelSetup } from "./modelSetup";
 import { ModelTest } from "./ModelTest";
 import { CUSTOM_AVATAR, PERSONAS, personaFor } from "./personas";
 import type { Agent, AgentCreate, Provider } from "./types";
@@ -68,6 +69,7 @@ export function AgentForm({
     unknown_action: agent?.unknown_action ?? "default",
     vision_enabled: agent?.vision_enabled ?? false,
     mcp_servers: agent?.mcp_servers ?? [],
+    auto_model: agent?.auto_model ?? false,
     vm_memory_mb: agent?.vm_memory_mb ?? 4096,
     vm_cpus: agent?.vm_cpus ?? 4,
   });
@@ -90,6 +92,7 @@ export function AgentForm({
 
   const set = <K extends keyof AgentCreate>(key: K, value: AgentCreate[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
+  const setup = useModelSetup();
 
   useEffect(() => {
     if (!photo) {
@@ -326,6 +329,57 @@ export function AgentForm({
           </label>
         </div>
         <ModelTest provider={form.provider} model={form.model} />
+        {setup.models.length > 0 && (
+          <div className="model-picks">
+            <span className="hint">Your models:</span>
+            {setup.models.map((choice) => (
+              <button
+                key={choice.label}
+                type="button"
+                className={`pick${form.provider === choice.provider && form.model === choice.model ? " on" : ""}`}
+                title={`${choice.provider} · ${choice.model}`}
+                onClick={() => setForm((current) => ({ ...current, provider: choice.provider, model: choice.model }))}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="tasks-use">
+          <span className="field-label">Tasks use</span>
+          <div className="segmented" role="radiogroup" aria-label="Tasks use">
+            <button type="button" role="radio" aria-checked={!form.auto_model} onClick={() => set("auto_model", false)}>
+              This model
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={form.auto_model}
+              disabled={!setup.autoReady && !form.auto_model}
+              onClick={() => set("auto_model", true)}
+            >
+              Auto
+            </button>
+          </div>
+          {!setup.autoReady ? (
+            <span className="hint">
+              Auto picks a model per task from routes you describe. Set it up under{" "}
+              <a href="#/settings/routing" onClick={onClose}>
+                Settings › Models &amp; routing
+              </a>
+              .
+            </span>
+          ) : form.auto_model ? (
+            <span className="hint">
+              Each task (in the chat and in channels) goes to the model its route names:{" "}
+              {setup.routing?.routes.map((route) => `${route.when} → ${route.use}`).join("; ")}.
+              {setup.routing?.escalate_to ? ` Stuck tasks go to ${setup.routing.escalate_to}.` : ""} The model above
+              is used when Auto is unsure and for hand-offs from colleagues.
+            </span>
+          ) : (
+            <span className="hint">Every task uses the model above. You can still pick another one per task in the chat.</span>
+          )}
+        </div>
         <label>
           Job description
           <textarea

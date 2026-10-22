@@ -4,6 +4,7 @@ import { AgentView } from "./AgentView";
 import { api, loadToken, saveToken, setToken, UnauthorizedError } from "./api";
 import { Avatar } from "./Avatar";
 import { ChannelView } from "./ChannelView";
+import { agentModelLabel, refreshModelSetup, useModelSetup } from "./modelSetup";
 import { parseRoute, routeFor, type View } from "./route";
 import { SettingsPage } from "./SettingsPage";
 import { UpdateBanner } from "./UpdateBanner";
@@ -22,6 +23,11 @@ const ACTIVITY_LABELS: Record<Agent["activity"], string> = {
 
 export function App() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
+  const modelSetup = useModelSetup();
+  // Loaded once the API token is known (before that, requests are turned away).
+  useEffect(() => {
+    if (authorized) void refreshModelSetup();
+  }, [authorized]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -172,7 +178,7 @@ export function App() {
                 ) : agent.activity === "working" ? (
                   "Working…"
                 ) : (
-                  agent.model
+                  agentModelLabel(agent, modelSetup)
                 )}
               </span>
             </button>
