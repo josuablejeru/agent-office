@@ -1692,3 +1692,22 @@ textarea:focus {
   color: var(--accent, var(--muted));
   font-weight: 600;
 }
+
+.route-row {
+  display: grid;
+  grid-template-columns: 1fr auto minmax(100px, auto) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.inline-field input[type="number"] {
+  width: 64px;
+}

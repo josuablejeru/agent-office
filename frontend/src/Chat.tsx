@@ -73,6 +73,8 @@ function ToolCalls({ agentId, calls }: { agentId: number; calls: ToolCall[] }) {
   );
 }
 
+const AUTO = "__auto__";
+
 export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
   // A run can start without this chat sending anything: a channel mention, or a
   // colleague handing work over. The agent's activity changing is the signal to look.
@@ -85,16 +87,22 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
   const bottom = useRef<HTMLDivElement>(null);
   // The model for the next task: "" is the agent's own, otherwise a name from Settings.
   const [models, setModels] = useState<ModelChoice[]>([]);
+  const [autoReady, setAutoReady] = useState(false);
   const [chosen, setChosen] = useState(() => rememberedModel(agent.id));
   useEffect(() => {
     void api
       .modelChoices()
       .then(setModels)
       .catch(() => setModels([]));
+    void api
+      .routing()
+      .then((routing) => setAutoReady(!!routing.router && routing.routes.length > 0))
+      .catch(() => setAutoReady(false));
   }, []);
   useEffect(() => setChosen(rememberedModel(agent.id)), [agent.id]);
   // A name that was since removed in Settings falls back to the agent's own model.
-  const choice = models.find((model) => model.label === chosen) ?? null;
+  const auto = chosen === AUTO && autoReady;
+  const choice = auto ? null : (models.find((model) => model.label === chosen) ?? null);
   const isDefault = (model: ModelChoice) => model.provider === agent.provider && model.model === agent.model;
   const choose = (label: string) => {
     setChosen(label);
@@ -145,7 +153,11 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
     if (!content || activeRun !== null || !ready) return;
     setError(null);
     try {
-      const { run_id } = await api.sendMessage(agent.id, content, choice && !isDefault(choice) ? choice : null);
+      const { run_id } = await api.sendMessage(
+        agent.id,
+        content,
+        auto ? "auto" : choice && !isDefault(choice) ? choice : null,
+      );
       setDraft("");
       await load();
       setActiveRun(run_id);
@@ -194,8 +206,13 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
                   </Markdown>
                   <div className="message-actions">
                     {run && run.model && (
-                      <span className={`model-note${run.switched ? " switched" : ""}`} title={`${run.provider} · ${run.model}`}>
+                      <span
+                        className={`model-note${run.switched ? " switched" : ""}`}
+                        title={[run.route_note, `${run.provider} · ${run.model}`].filter(Boolean).join("\n")}
+                      >
+                        {run.auto ? "Auto › " : ""}
                         {modelName(models, run.provider, run.model)}
+                        {run.route_note?.includes("escalated") ? " ↑" : ""}
                       </span>
                     )}
                     <CopyButton text={message.content} />
@@ -243,11 +260,12 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
             className="model-switch"
             aria-label="Model for this task"
             title="Model for the tasks you send"
-            value={choice ? choice.label : ""}
+            value={auto ? AUTO : choice ? choice.label : ""}
             disabled={activeRun !== null}
             onChange={(e) => choose(e.target.value)}
           >
             <option value="">{modelName(models, agent.provider, agent.model)} (default)</option>
+            {autoReady && <option value={AUTO}>Auto</option>}
             {models
               .filter((model) => !isDefault(model))
               .map((model) => (
@@ -274,8 +292,10 @@ export function Chat({ agent, ready }: { agent: Agent; ready: boolean }) {
         )}
       </form>
       <div className="composer-foot">
-        Requests go to {choice ? choice.provider : agent.provider} ({choice ? choice.model : agent.model}). Actions run
-        on the agent&apos;s own computer.
+        {auto
+          ? "Auto picks the model for each task (Settings › Model providers)."
+          : `Requests go to ${choice ? choice.provider : agent.provider} (${choice ? choice.model : agent.model}).`}{" "}
+        Actions run on the agent&apos;s own computer.
       </div>
 
       {active?.pending_approval && (

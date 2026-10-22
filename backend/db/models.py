@@ -88,6 +88,9 @@ class Run(SQLModel, table=True):
     # The model this run used, when the user switched away from the agent's own.
     provider: str | None = None
     model: str | None = None
+    # Auto: the model was chosen by routing (see backend/agents/routing.py), and why.
+    auto: bool = False
+    route_note: str | None = None
     started_at: datetime = Field(default_factory=utcnow)
     finished_at: datetime | None = None
 

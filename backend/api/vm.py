@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from backend.agents.manager import AgentManager, AgentNotFound
 from backend.agents.models import AgentRead
+from backend.agents.routing import RoutingSettings, load_routing
 from backend.api.deps import (
     AgentManagerDep,
     BaseImageBuilderDep,
@@ -160,6 +161,26 @@ async def save_models(payload: list[ModelChoice], settings: SettingsDep) -> list
     cleaned = [ModelChoice(label=c.label.strip(), provider=c.provider, model=c.model.strip()) for c in payload]
     settings.update_user_config(["models"], [choice.model_dump() for choice in cleaned])
     return cleaned
+
+
+@router.get("/routing")
+async def get_routing(settings: SettingsDep) -> RoutingSettings:
+    return load_routing(settings)
+
+
+@router.put("/routing")
+async def save_routing(payload: RoutingSettings, settings: SettingsDep) -> RoutingSettings:
+    """Automatic model choice: every name must be one from the list of models."""
+    names = {choice.label.lower() for choice in await list_models(settings)}
+    used = [("The model that chooses", payload.router), ("Escalation", payload.escalate_to)]
+    used += [(f"Route {index}", route.use) for index, route in enumerate(payload.routes, start=1)]
+    for where, label in used:
+        if label and label.strip().lower() not in names:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{where}: '{label}' is not in the list of models.")
+    if payload.routes and not payload.router:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose the model that picks the route.")
+    settings.update_user_config(["routing"], payload.model_dump())
+    return payload
 
 
 @router.post("/providers", status_code=status.HTTP_201_CREATED)

@@ -11,6 +11,7 @@ import type {
   ClaudeDesktopServer,
   McpServer,
   ModelChoice,
+  RoutingSettings,
   McpServerForm,
   PermissionsInfo,
   UpdateStatus,
@@ -193,11 +194,20 @@ export const api = {
       body: JSON.stringify({ project, region }),
     }),
   listMessages: (id: number) => request<Message[]>(`/api/agents/${id}/messages`),
-  sendMessage: (id: number, content: string, choice?: ModelChoice | null) =>
+  sendMessage: (id: number, content: string, choice?: ModelChoice | "auto" | null) =>
     request<{ run_id: number }>(
       `/api/agents/${id}/chat`,
-      post(choice ? { content, provider: choice.provider, model: choice.model } : { content }),
+      post(
+        choice === "auto"
+          ? { content, auto: true }
+          : choice
+            ? { content, provider: choice.provider, model: choice.model }
+            : { content },
+      ),
     ),
+  routing: () => request<RoutingSettings>("/api/routing"),
+  saveRouting: (routing: RoutingSettings) =>
+    request<RoutingSettings>("/api/routing", { method: "PUT", body: JSON.stringify(routing) }),
   modelChoices: () => request<ModelChoice[]>("/api/models"),
   saveModelChoices: (models: ModelChoice[]) =>
     request<ModelChoice[]>("/api/models", { method: "PUT", body: JSON.stringify(models) }),

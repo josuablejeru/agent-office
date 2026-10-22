@@ -67,6 +67,10 @@ through the same approvals, and the tokens stay in your Keychain.
 Switch models per task: name the models you use under Settings › Model
 providers (say *Haiku* for quick jobs, *Opus* or *Gemini* for hard ones), then
 pick one next to the message box. Each answer shows which model wrote it.
+Or choose **Auto**: describe in plain words which tasks go to which model, and
+a fast model picks one per task. A model that gets stuck hands over to a
+stronger one. Model IDs you have used, and Vertex AI's Model Garden, are
+suggested wherever you type one.
 
 Ollama, LM Studio and any other OpenAI-compatible server, on this Mac or your
 network; OpenAI, Anthropic, and Gemini or Claude on Google Vertex AI. Models

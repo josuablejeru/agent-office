@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { ModelTest } from "./ModelTest";
-import type { ModelChoice, Provider } from "./types";
+import type { ModelChoice, Provider, RoutingSettings } from "./types";
 
 /** Settings › Model providers: the models you switch between, under short names. */
 export function ModelList({ providers }: { providers: Provider[] }) {
@@ -112,6 +112,129 @@ export function ModelList({ providers }: { providers: Provider[] }) {
           </button>
         )}
       </div>
+      {message && <p className={message.ok ? "hint ok" : "form-error"}>{message.text}</p>}
+      <Routing models={JSON.parse(saved || "[]") as ModelChoice[]} />
+    </div>
+  );
+}
+
+const NO_ROUTING: RoutingSettings = { router: "", routes: [], escalate_to: "", escalate_after: 3 };
+
+/** Automatic model choice: routes in plain words, the model that picks one, and escalation. */
+function Routing({ models }: { models: ModelChoice[] }) {
+  const [routing, setRouting] = useState<RoutingSettings | null>(null);
+  const [saved, setSaved] = useState("");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    void api
+      .routing()
+      .then((loaded) => {
+        setRouting(loaded);
+        setSaved(JSON.stringify(loaded));
+      })
+      .catch(() => setRouting(NO_ROUTING));
+  }, []);
+  if (routing === null) return null;
+  if (models.length < 2) {
+    return (
+      <p className="hint">
+        Add at least two models above to let agents choose between them automatically.
+      </p>
+    );
+  }
+  const set = (change: Partial<RoutingSettings>) => setRouting({ ...routing, ...change });
+  const editRoute = (index: number, change: Partial<{ when: string; use: string }>) =>
+    set({ routes: routing.routes.map((route, i) => (i === index ? { ...route, ...change } : route)) });
+  const pick = (value: string, onChange: (label: string) => void, label: string, empty?: string) => (
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+      {empty !== undefined && <option value="">{empty}</option>}
+      {empty === undefined && !value && <option value="">Choose…</option>}
+      {models.map((model) => (
+        <option key={model.label} value={model.label}>
+          {model.label}
+        </option>
+      ))}
+    </select>
+  );
+
+  async function save() {
+    if (!routing) return;
+    setMessage(null);
+    try {
+      const cleaned = { ...routing, routes: routing.routes.filter((route) => route.when.trim()) };
+      const stored = await api.saveRouting(cleaned);
+      setRouting(stored);
+      setSaved(JSON.stringify(stored));
+      setMessage({ ok: true, text: "Saved. Choose Auto next to an agent's message box." });
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return (
+    <div className="model-list">
+      <h3>Automatic model choice</h3>
+      <p className="hint">
+        Describe in plain words which kind of task goes to which model. With <b>Auto</b> chosen next to the message
+        box, a small, fast model reads your request and picks the route, once per task. It sees only what you
+        wrote, never web pages. When it is unsure, the agent&apos;s own model is used.
+      </p>
+      <label className="inline-field">
+        The model that chooses {pick(routing.router, (router) => set({ router }), "The model that chooses")}
+      </label>
+      {routing.routes.map((route, index) => (
+        <div key={index} className="route-row">
+          <input
+            aria-label={`Route ${index + 1}`}
+            placeholder="e.g. Quick questions, lookups and short replies"
+            value={route.when}
+            onChange={(e) => editRoute(index, { when: e.target.value })}
+          />
+          <span className="muted">→</span>
+          {pick(route.use, (use) => editRoute(index, { use }), `Model for route ${index + 1}`)}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => set({ routes: routing.routes.filter((_, i) => i !== index) })}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <div className="row-actions">
+        <button
+          type="button"
+          className="file-button"
+          onClick={() => set({ routes: [...routing.routes, { when: "", use: models[0].label }] })}
+        >
+          Add a route
+        </button>
+      </div>
+      <label className="inline-field">
+        When it gets stuck, hand over to{" "}
+        {pick(routing.escalate_to, (escalate_to) => set({ escalate_to }), "Escalate to", "Nobody (no escalation)")}
+        {routing.escalate_to && (
+          <>
+            {" "}after
+            <input
+              type="number"
+              min={2}
+              max={10}
+              aria-label="Failed actions before handing over"
+              value={routing.escalate_after}
+              onChange={(e) => set({ escalate_after: Number(e.target.value) || 3 })}
+            />
+            failed actions in a row, or when the model asks for it
+          </>
+        )}
+      </label>
+      {JSON.stringify(routing) !== saved && (
+        <div className="row-actions">
+          <button type="button" className="primary" onClick={() => void save()}>
+            Save automatic choice
+          </button>
+        </div>
+      )}
       {message && <p className={message.ok ? "hint ok" : "form-error"}>{message.text}</p>}
     </div>
   );

@@ -357,6 +357,6 @@ def classify(operation: str, arguments: dict[str, Any]) -> RuleVerdict:
         return AMBIGUOUS
     if operation in ("file.read", "file.list", "browser.extract_text", "browser.screenshot",
                      "browser.current_url", "browser.scroll", "browser.search", "channel.read",
-                     "channel.post", "memory.remember", "memory.recall", "memory.forget"):
+                     "channel.post", "model.escalate", "memory.remember", "memory.recall", "memory.forget"):
         return RuleVerdict(action=PolicyAction.ALLOW, reason="harmless operation")
     return AMBIGUOUS

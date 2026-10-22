@@ -15,6 +15,7 @@ from backend.providers.base import (
     ProviderError,
     ToolSpec,
 )
+from backend.providers.history import flatten_tool_turns
 from backend.providers.openai import OpenAIProvider
 from backend.providers.openai_compatible import OpenAICompatibleProvider
 from backend.providers.vertex import (
@@ -93,4 +94,5 @@ class FallbackProvider(ModelProvider):
             return await self._primary.chat(messages, tools)
         except ProviderError as exc:
             log.warning("primary model failed, using fallback", extra={"error": str(exc)})
-            return await self._fallback.chat(messages, tools)
+            # The primary's tool turns may carry data only it accepts: shown as text instead.
+            return await self._fallback.chat(flatten_tool_turns(messages), tools)

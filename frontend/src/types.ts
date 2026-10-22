@@ -233,6 +233,13 @@ export interface PendingApproval {
   reason: string | null;
 }
 
+export interface RoutingSettings {
+  router: string;
+  routes: { when: string; use: string }[];
+  escalate_to: string;
+  escalate_after: number;
+}
+
 export interface ModelChoice {
   label: string;
   provider: string;
@@ -248,6 +255,9 @@ export interface Run {
   provider: string;
   model: string;
   switched: boolean;
+  /** The model was chosen by Auto; the note says how (and whether it escalated). */
+  auto: boolean;
+  route_note: string | null;
   tool_calls: ToolCall[];
   pending_approval: PendingApproval | null;
 }

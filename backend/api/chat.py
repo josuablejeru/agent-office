@@ -35,6 +35,8 @@ class ChatRequest(BaseModel):
     # Another model for this one task; both or neither.
     provider: str | None = Field(default=None, max_length=63)
     model: str | None = Field(default=None, max_length=200)
+    # Let routing choose the model (Settings › Model providers › Automatic model choice).
+    auto: bool = False
 
 
 class ChatStarted(BaseModel):
@@ -83,6 +85,9 @@ class RunRead(BaseModel):
     provider: str
     model: str
     switched: bool
+    auto: bool = False
+    # How Auto chose, and whether the task was handed to a stronger model.
+    route_note: str | None = None
     tool_calls: list[ToolCallRead]
     # Set while the run is paused waiting for the user's decision.
     pending_approval: ApprovalRead | None
@@ -113,6 +118,7 @@ async def send_message(
     try:
         return ChatStarted(run_id=runs.start(
             agent_id, payload.content, provider=payload.provider or None, model=(payload.model or "").strip() or None,
+            auto=payload.auto,
         ))
     except RunError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
@@ -152,6 +158,8 @@ def get_run(run_id: int, session: SessionDep) -> RunRead:
         provider=run.provider if switched else (agent.provider if agent else ""),
         model=run.model if switched else (agent.model if agent else ""),
         switched=switched,
+        auto=run.auto,
+        route_note=run.route_note,
         pending_approval=pending,
         tool_calls=[
             ToolCallRead(

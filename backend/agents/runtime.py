@@ -19,6 +19,15 @@ from backend.agents.channels import (
     mentions,
 )
 from backend.agents.loop import LoopResult, Outcome, RunLimits, StopReason, run_agent_loop
+from backend.agents.routing import (
+    ESCALATE_OPERATION,
+    ESCALATE_SPEC,
+    EscalatingProvider,
+    choose_model,
+    find,
+    load_routing,
+    model_list,
+)
 from backend.agents.tools import (
     ENVIRONMENT_NOTE,
     VISION_NOTE,
@@ -214,7 +223,7 @@ class RunService:
 
     def start(
         self, agent_id: int, content: str, channel_id: int | None = None, hops: int = 0,
-        provider: str | None = None, model: str | None = None,
+        provider: str | None = None, model: str | None = None, auto: bool = False,
     ) -> int:
         """Store the user message and run the agent in the background. Returns the run id.
 
@@ -228,7 +237,9 @@ class RunService:
         if provider is not None and provider not in self._settings.load_providers():
             raise RunError(f"There is no provider '{provider}'.")
         with Session(self._engine) as session:
-            run = Run(agent_id=agent_id, channel_id=channel_id, hops=hops, provider=provider, model=model)
+            # A model chosen by hand wins over Auto.
+            auto = auto and provider is None
+            run = Run(agent_id=agent_id, channel_id=channel_id, hops=hops, provider=provider, model=model, auto=auto)
             session.add(run)
             session.commit()
             session.refresh(run)
@@ -469,6 +480,64 @@ class RunService:
             return FallbackProvider(primary, build(agent.fallback_provider, agent.fallback_model))
         return primary
 
+    async def _route(self, session: Session, run: Run, agent: Agent, task: str) -> None:
+        """Auto: let the router model choose this task's model, once, before it starts."""
+        routing = load_routing(self._settings)
+        if not routing.enabled:
+            run.route_note = "Auto is not set up: the agent's own model"
+        else:
+            providers = self._settings.load_providers()
+
+            def build(name: str, model: str) -> ModelProvider:
+                if name not in providers:
+                    raise ProviderError(f"provider '{name}' is not defined")
+                return self._provider_factory(name, providers[name], model)
+
+            earlier = session.exec(
+                select(Message.content)
+                .where(Message.agent_id == agent.id, Message.role == "user", Message.run_id != run.id)
+                .order_by(Message.id.desc())  # type: ignore[union-attr]
+                .limit(2)
+            ).all()
+            choice, why = await choose_model(routing, model_list(self._settings), [*reversed(earlier), task], build)
+            if choice is not None:
+                run.provider, run.model = choice.provider, choice.model
+                run.route_note = f"Auto chose {choice.label} for {why}"
+            else:
+                run.route_note = f"Auto: {why}, so the agent's own model"
+        log.info("routed", extra={"run": run.id, "agent": agent.name, "note": run.route_note})
+        session.add(run)
+        session.commit()
+
+    def _escalation(
+        self, session: Session, run: Run, agent: Agent, provider: ModelProvider
+    ) -> EscalatingProvider | None:
+        """For Auto tasks: the stronger model to hand over to, when one is set and differs."""
+        if not run.auto:
+            return None
+        routing = load_routing(self._settings)
+        target = find(model_list(self._settings), routing.escalate_to) if routing.escalate_to else None
+        current = (run.provider or agent.provider, run.model or agent.model)
+        if target is None or (target.provider, target.model) == current:
+            return None
+        providers = self._settings.load_providers()
+        if target.provider not in providers:
+            return None
+
+        def escalated(note: str) -> None:
+            run.provider, run.model = target.provider, target.model
+            run.route_note = f"{run.route_note}; {note}" if run.route_note else note
+            session.add(run)
+            session.commit()  # now: finishing a run starts with a rollback
+
+        return EscalatingProvider(
+            provider,
+            lambda: self._provider_factory(target.provider, providers[target.provider], target.model),
+            target.label,
+            routing.escalate_after,
+            escalated,
+        )
+
     async def _recall(self, client: GuestClient, agent: Agent, task: str) -> str:
         """What the agent remembers that bears on this task, as a block for its instructions."""
         try:
@@ -537,9 +606,17 @@ class RunService:
             try:
                 if agent.vm_daemon_port is None:
                     raise VMError("The agent's VM has not been started.")
+                if run.auto:
+                    await self._route(session, run, agent, task)
                 tools = tools_for(agent)
                 mcp_tools, mcp_handlers = await self._mcp_tools(agent)
                 tools += mcp_tools
+                provider = self._provider(agent, run)
+                escalation = self._escalation(session, run, agent, provider)
+                if escalation is not None:
+                    provider = escalation
+                    tools.append(AgentTool(operation=ESCALATE_OPERATION, permission="model", spec=ESCALATE_SPEC))
+                    mcp_handlers = {**mcp_handlers, ESCALATE_OPERATION: escalation.request}
                 client = self._client_factory(agent.vm_daemon_port, self._vm_manager.guest_secret(agent))
                 # Recall happens before the first tool call, so the Memory setting is
                 # applied here: only an agent that may use its memory freely gets it.
@@ -554,7 +631,7 @@ class RunService:
                     vision=agent.vision_enabled,
                 )
                 result = await run_agent_loop(
-                    self._provider(agent, run),
+                    provider,
                     self._history(session, agent, recalled),
                     [tool.spec for tool in tools],
                     executor,
