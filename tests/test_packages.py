@@ -311,7 +311,77 @@ def test_a_base_image_that_cannot_be_verified_stops_the_build(tmp_path: Path) ->
 
 
 def test_the_base_image_path_is_checked() -> None:
-    for bad in ("../x.qcow2", "repo/x.iso", "/repo/x.qcow2", "repo/../x.qcow2", "x.qcow2"):
+    for bad in ("../x.qcow2", "repo/x.iso", "/repo/x.qcow2", "repo/../x.qcow2", "repo/", "-repo", "re po"):
         with pytest.raises(ValueError):
             Artifactory(**{**REPO, "base_image": bad})
-    assert Artifactory(**{**REPO, "base_image": "images/debian/agent-arm64.raw"}).base_image
+    file = Artifactory(**{**REPO, "base_image": "images/debian/agent-arm64.raw"})
+    assert file.base_image and not file.debian_mirror_repo
+    # Only a repository name: Debian's cloud images through that mirror.
+    assert Artifactory(**{**REPO, "base_image": "debian-cloud-remote"}).debian_mirror_repo == "debian-cloud-remote"
+
+
+def test_the_debian_release_is_the_one_the_build_script_uses() -> None:
+    from backend.net.packages import DEBIAN_RELEASE, DEBIAN_VERSION
+
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "create-base-image.sh").read_text()
+    assert f'DEBIAN_RELEASE="${{DEBIAN_RELEASE:-{DEBIAN_RELEASE}}}"' in script
+    assert f'DEBIAN_VERSION="${{DEBIAN_VERSION:-{DEBIAN_VERSION}}}"' in script
+
+
+def debian_mirror_repository(tmp_path: Path, layout: str = "") -> tuple[FakeArtifactory, Artifactory]:
+    from backend.net.packages import DEBIAN_IMAGE, DEBIAN_RELEASE
+
+    sums = tmp_path / "SHA512SUMS"
+    sums.write_text(f"{'0' * 128}  debian-13-genericcloud-arm64.qcow2\n{'a' * 128}  {DEBIAN_IMAGE}\n")
+    fake = FakeArtifactory("jo", "tok")
+    fake.publish(f"debian-cloud/{layout}{DEBIAN_RELEASE}/latest/SHA512SUMS", sums)
+    repository = Artifactory(url=fake.url(), username="jo", pypi_repo="pypi-remote", base_image="debian-cloud")
+    return fake, repository
+
+
+@pytest.mark.parametrize("layout", ["", "images/cloud/"])
+def test_a_debian_mirror_repository_is_found_by_its_name(tmp_path: Path, layout: str) -> None:
+    from backend.net.packages import ImageError, debian_mirror
+
+    fake, repository = debian_mirror_repository(tmp_path, layout)
+    try:
+        mirror = asyncio.run(debian_mirror(repository, "tok"))
+        assert mirror.url == f"{fake.url()}/debian-cloud/{layout}trixie/latest"
+        with pytest.raises(ImageError, match="refused the username or token"):
+            asyncio.run(debian_mirror(repository, "wrong"))
+        with pytest.raises(ImageError, match="does not serve Debian's cloud images"):
+            asyncio.run(debian_mirror(repository.model_copy(update={"base_image": "other"}), "tok"))
+    finally:
+        fake.close()
+
+
+def test_the_build_gets_the_debian_mirror_and_credentials(tmp_path: Path) -> None:
+    from backend.keystore import KeyStore
+    from backend.net.packages import PackageSource
+    from tests.test_agents_api import FakeKeychain
+
+    fake, repository = debian_mirror_repository(tmp_path)
+    try:
+        settings = Settings(home=tmp_path / "home")
+        settings.ensure_layout()
+        settings.update_user_config(["packages", "artifactory"], repository.model_dump())
+        keys = KeyStore(run=FakeKeychain())
+        keys.set("ARTIFACTORY_TOKEN", "tok")
+        script = tmp_path / "build.sh"
+        script.write_text(
+            "#!/bin/bash\n"
+            'echo "mirror=$DEBIAN_MIRROR image=${BASE_IMAGE_URL:-none}"\n'
+            'echo "mode=$(stat -f %Lp "$DEBIAN_MIRROR_CURL_CONFIG")"\n'
+        )
+
+        async def scenario() -> None:
+            builder = BaseImageBuilder(settings, script=script, base_image=PackageSource(settings, keys).base_image)
+            builder.start()
+            await builder._task  # noqa: SLF001
+
+        asyncio.run(scenario())
+        log = (settings.images_dir / "build.log").read_text()
+        assert f"mirror={fake.url()}/debian-cloud/trixie/latest image=none" in log and "mode=600" in log
+        assert not (settings.images_dir / ".artifactory-curl").exists()
+    finally:
+        fake.close()

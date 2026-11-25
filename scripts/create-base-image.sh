@@ -18,6 +18,11 @@
 #             Debian's public one: its address, the SHA-256 Artifactory records
 #             for it (required: it is refused otherwise), a curl config file
 #             with the credentials, and its name for the log
+#   DEBIAN_MIRROR, DEBIAN_MIRROR_CURL_CONFIG
+#             fetch Debian's cloud image and its SHA512SUMS from this folder
+#             (a mirror of .../images/cloud/<release>/latest, e.g. a remote
+#             repository in Artifactory) instead of cloud.debian.org, with the
+#             credentials in this curl config file
 #   PIP_INDEX_URL=https://user:token@host/artifactory/api/pypi/repo/simple
 #             fetch the agent software's Python packages from a company
 #             repository instead of the public index (set in the app's Settings)
@@ -45,7 +50,9 @@ GUEST_PIP_PACKAGES=("websockets==17.2" "playwright==1.63.0")
 
 # "generic" rather than "genericcloud": the latter's kernel has no display
 # drivers, which the VM desktop (VNC) needs.
-MIRROR="https://cloud.debian.org/images/cloud/${DEBIAN_RELEASE}/latest"
+MIRROR="${DEBIAN_MIRROR:-https://cloud.debian.org/images/cloud/${DEBIAN_RELEASE}/latest}"
+MIRROR_CURL=()
+[ -n "${DEBIAN_MIRROR_CURL_CONFIG:-}" ] && MIRROR_CURL=(-K "$DEBIAN_MIRROR_CURL_CONFIG")
 CLOUD_IMAGE="debian-${DEBIAN_VERSION}-generic-arm64.qcow2"
 OK_MARKER="AGENT_OFFICE_PROVISION_OK"
 
@@ -130,11 +137,11 @@ if [ -n "${BASE_IMAGE_URL:-}" ]; then
   SOURCE_CHECKSUM="sha256:$BASE_IMAGE_SHA256"
 else
   echo "==> Downloading $CLOUD_IMAGE"
-  expected="$(curl -fsSL "$MIRROR/SHA512SUMS" | awk -v f="$CLOUD_IMAGE" '$2 == f {print $1}')"
+  expected="$(curl -fsSL ${MIRROR_CURL[@]+"${MIRROR_CURL[@]}"} "$MIRROR/SHA512SUMS" | awk -v f="$CLOUD_IMAGE" '$2 == f {print $1}')"
   [ -n "$expected" ] || die "no checksum published for $CLOUD_IMAGE"
   # A cached download from an earlier "latest" no longer matches: fetch it afresh once.
   for attempt in 1 2; do
-    curl -fL --retry 3 -C - -o "$CACHE_DIR/$CLOUD_IMAGE" "$MIRROR/$CLOUD_IMAGE"
+    curl -fL --retry 3 -C - ${MIRROR_CURL[@]+"${MIRROR_CURL[@]}"} -o "$CACHE_DIR/$CLOUD_IMAGE" "$MIRROR/$CLOUD_IMAGE"
     actual="$(shasum -a 512 "$CACHE_DIR/$CLOUD_IMAGE" | awk '{print $1}')"
     [ "$expected" = "$actual" ] && break
     rm -f "$CACHE_DIR/$CLOUD_IMAGE"

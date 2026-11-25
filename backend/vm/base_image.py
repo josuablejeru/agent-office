@@ -46,7 +46,7 @@ class BaseImageBuilder:
         self._script = script
         self._certificates = certificates
         self._pip_index_url = pip_index_url
-        # Returns (ImageInfo, curl credentials) for a company base image, or None.
+        # Returns (ImageInfo or DebianMirror, curl credentials) for an image from Artifactory, or None.
         self._base_image = base_image
         self._task: asyncio.Task[None] | None = None
         self._detail = ""
@@ -200,10 +200,13 @@ class BaseImageBuilder:
                 fd = os.open(credentials_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 with os.fdopen(fd, "w") as handle:
                     handle.write(credentials)
-                env.update({
-                    "BASE_IMAGE_URL": image.url, "BASE_IMAGE_SHA256": image.sha256,
-                    "BASE_IMAGE_NAME": image.path, "BASE_IMAGE_CURL_CONFIG": str(credentials_file),
-                })
+                if hasattr(image, "sha256"):
+                    env.update({
+                        "BASE_IMAGE_URL": image.url, "BASE_IMAGE_SHA256": image.sha256,
+                        "BASE_IMAGE_NAME": image.path, "BASE_IMAGE_CURL_CONFIG": str(credentials_file),
+                    })
+                else:  # Debian's own image through a mirror repository
+                    env.update({"DEBIAN_MIRROR": image.url, "DEBIAN_MIRROR_CURL_CONFIG": str(credentials_file)})
         try:
             await self._run_build(env)
         finally:

@@ -445,6 +445,12 @@ Settings shows the internal domains currently in effect.
   the desktop, Chrome and the agent software on top. The image must be built
   for ARM64 (aarch64), be Debian-based with cloud-init (NoCloud), and be qcow2
   or raw; an x86_64 image is stopped within seconds with that explanation.
+  Where Debian's public server is blocked but Artifactory has a remote
+  repository for it (`https://cloud.debian.org/images/cloud/`), enter just
+  that repository's name as the base image instead: the build then fetches
+  Debian's own cloud image and its `SHA512SUMS` through it, with the same
+  checks as from Debian directly. The repository may start out empty;
+  Artifactory fetches the files on first use.
   Where every image came from is recorded in
   `images/debian-desktop.source.json` and shown in Settings.
 - **Signing in is separate.** The agent's Chrome has none of your sessions or

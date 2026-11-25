@@ -25,8 +25,17 @@ from backend.keystore import KeyStore
 TOKEN_KEY = "ARTIFACTORY_TOKEN"
 CONFIG_PATH = ["packages", "artifactory"]
 REPOSITORY = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-# repository/path/to/image.qcow2 in Artifactory: no "..", no leading slash.
-IMAGE_PATH = r"^$|^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(/[A-Za-z0-9][A-Za-z0-9._+-]{0,200})+\.(qcow2|img|raw)$"
+# Either repository/path/to/image.qcow2 in Artifactory (no "..", no leading slash), or only the
+# name of a repository that mirrors Debian's cloud images (a remote of cloud.debian.org).
+IMAGE_PATH = (r"^$|^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+              r"|^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(/[A-Za-z0-9][A-Za-z0-9._+-]{0,200})+\.(qcow2|img|raw)$")
+# The Debian cloud image the build uses; keep in step with scripts/create-base-image.sh.
+DEBIAN_RELEASE = "trixie"
+DEBIAN_VERSION = "13"
+DEBIAN_IMAGE = f"debian-{DEBIAN_VERSION}-generic-arm64.qcow2"
+# Where a mirror repository may keep the releases: a remote of https://cloud.debian.org/images/cloud/
+# has them at its top, a remote of https://cloud.debian.org/ under images/cloud/.
+DEBIAN_LAYOUTS = ("", "images/cloud/")
 
 
 class Artifactory(BaseModel):
@@ -35,9 +44,15 @@ class Artifactory(BaseModel):
     username: str = Field(min_length=1, max_length=200)
     pypi_repo: str = Field(pattern=REPOSITORY)
     npm_repo: str = Field(default="", pattern=r"^$|" + REPOSITORY)
-    # The company's (hardened) base image the agent computers are built on, as repository/path.
-    # Empty: Debian's public cloud image.
+    # The company's (hardened) base image the agent computers are built on, as repository/path;
+    # or only a repository name: Debian's cloud image through that mirror of cloud.debian.org.
+    # Empty: Debian's public cloud image, straight from Debian.
     base_image: str = Field(default="", pattern=IMAGE_PATH)
+
+    @property
+    def debian_mirror_repo(self) -> str:
+        """The repository mirroring Debian's cloud images, if base_image names only a repository."""
+        return self.base_image if self.base_image and "/" not in self.base_image else ""
 
     @field_validator("url")
     @classmethod
@@ -81,8 +96,47 @@ class ImageInfo(BaseModel):
     modified: str = ""
 
 
+class DebianMirror(BaseModel):
+    """Debian's cloud images through an Artifactory repository that mirrors cloud.debian.org."""
+
+    repository: str
+    # The release's "latest" folder, as the build script's MIRROR: SHA512SUMS and the image are in it.
+    url: str
+
+
 class ImageError(Exception):
     pass
+
+
+async def debian_mirror(repository: Artifactory, token: str, timeout: float = 20.0) -> DebianMirror:
+    """Find Debian's release folder in the mirror repository.
+
+    The checksums come through the mirror from Debian (SHA512SUMS), as they do
+    from Debian directly; the build checks the image against them.
+    """
+    name = repository.debian_mirror_repo
+    if not name:
+        raise ImageError("No Debian mirror repository is set.")
+    auth = (repository.username, token)
+    tried: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            for layout in DEBIAN_LAYOUTS:
+                folder = f"{repository.url}/{name}/{layout}{DEBIAN_RELEASE}/latest"
+                response = await client.get(f"{folder}/SHA512SUMS", auth=auth)
+                if response.status_code in (401, 403):
+                    raise ImageError("Artifactory refused the username or token for the base image.")
+                if response.status_code == 200 and any(
+                    line.split()[1:2] == [DEBIAN_IMAGE] for line in response.text.splitlines()
+                ):
+                    return DebianMirror(repository=name, url=folder)
+                tried.append(f"{name}/{layout}{DEBIAN_RELEASE}/latest/SHA512SUMS (HTTP {response.status_code})")
+    except httpx.HTTPError as exc:
+        raise ImageError(f"Artifactory could not be reached: {type(exc).__name__}: {exc}"[:300]) from exc
+    raise ImageError(
+        f"The repository '{name}' does not serve Debian's cloud images ({DEBIAN_IMAGE}): tried "
+        + " and ".join(tried) + ". It should be a remote of https://cloud.debian.org/images/cloud/."
+    )
 
 
 async def image_info(repository: Artifactory, token: str, timeout: float = 20.0) -> ImageInfo:
@@ -164,8 +218,9 @@ class PackageSource:
         current = self.current()
         return current[0].guest_settings(current[1]) if current else None
 
-    async def base_image(self) -> tuple[ImageInfo, str] | None:
-        """The company base image to build on, with curl's credentials; None for Debian's.
+    async def base_image(self) -> tuple[ImageInfo | DebianMirror, str] | None:
+        """The company base image (or Debian mirror) to build from, with curl's credentials;
+        None for Debian's public server.
 
         Raises ImageError when one is set but cannot be used: the build must not
         quietly fall back to the public image.
@@ -179,6 +234,8 @@ class PackageSource:
         repository, token = current
         if not repository.base_image:
             return None
+        if repository.debian_mirror_repo:
+            return await debian_mirror(repository, token), curl_config(repository, token)
         return await image_info(repository, token), curl_config(repository, token)
 
     async def pip_index_url(self) -> str:
@@ -201,6 +258,13 @@ async def check(repository: Artifactory, token: str, timeout: float = 15.0) -> C
         return CheckResult(ok=False, detail=f"Artifactory could not be reached: {type(exc).__name__}: {exc}"[:300])
     if response.status_code == 200 and "pip-" in response.text:
         detail = f"Connected: '{repository.pypi_repo}' serves Python packages."
+        if repository.debian_mirror_repo:
+            try:
+                mirror = await debian_mirror(repository, token, timeout)
+            except ImageError as exc:
+                return CheckResult(ok=False, detail=f"{detail} But the base image: {exc}")
+            return CheckResult(ok=True, detail=f"{detail} Debian {DEBIAN_VERSION}'s cloud image comes "
+                                               f"through '{mirror.repository}'.")
         if repository.base_image:
             try:
                 image = await image_info(repository, token, timeout)

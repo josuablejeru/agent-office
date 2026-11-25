@@ -117,13 +117,15 @@ export function PackageRepositorySettings() {
       <label>
         Base image for agents&apos; computers (optional)
         <input
-          placeholder="repository/path/to/image-arm64.qcow2"
+          placeholder="debian-cloud-remote, or repository/path/to/image-arm64.qcow2"
           value={form.base_image}
           onChange={(e) => set("base_image", e.target.value)}
         />
       </label>
       <p className="hint">
-        For a company-approved (hardened) image: the next system image build starts from it instead of Debian&apos;s
+        Only a repository name: a remote of Debian&apos;s cloud images (https://cloud.debian.org/images/cloud/), and
+        the build fetches Debian&apos;s image and its checksums through it instead of from Debian directly. A path to
+        a file, for a company-approved (hardened) image: the next system image build starts from it instead of Debian&apos;s
         public cloud image, and refuses it unless it matches the SHA-256 Artifactory records for it. It must be an
         ARM64 (aarch64) Debian-based image with cloud-init, in qcow2 or raw format.
         {imageSource && (
