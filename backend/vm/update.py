@@ -33,7 +33,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 from sqlalchemy.engine import Engine
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend.agents.manager import AgentManager
 from backend.config import Settings
@@ -129,6 +129,36 @@ class ComputerUpdater:
     async def wait(self) -> None:
         if self._worker is not None:
             await self._worker
+
+    async def recover_interrupted(self) -> list[str]:
+        """Undo updates the app quit or crashed in the middle of (call once, at startup).
+
+        An old disk still set aside means its agent's files may not have reached
+        the new computer. The old disk is the complete state from before the
+        update, so it is always safe to put it back; the update can be run again.
+        """
+        recovered = []
+        with Session(self._engine) as session:
+            agents = list(session.exec(select(Agent)).all())
+        for agent in agents:
+            disk = Path(agent.vm_disk_path)
+            previous = disk.with_name(PREVIOUS_DISK)
+            for leftover in self._settings.agent_dir(agent.name).glob(f"{ARCHIVE}*"):
+                leftover.unlink(missing_ok=True)
+            if not previous.exists():
+                continue
+            if await self._vms.status(agent) == VMStatus.RUNNING:
+                await self._vms.stop(agent)
+            disk.unlink(missing_ok=True)
+            os.replace(previous, disk)
+            log.warning("interrupted computer update undone", extra={"agent": agent.name})
+            if agent.id is not None:
+                self._status[agent.id] = UpdateStatus(
+                    state="failed",
+                    detail="The app quit during the update. The computer was put back as it was; update it again.",
+                )
+            recovered.append(agent.name)
+        return recovered
 
     # --- the update ---------------------------------------------------------------------
 

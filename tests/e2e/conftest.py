@@ -299,7 +299,8 @@ def office(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Office]:
     intranet = TlsServer(*make_server(corporate, corporate_key, certs, "intranet"), "intranet-ok")
     elsewhere = TlsServer(*make_server(stranger, stranger_key, certs, "elsewhere"), "elsewhere")
     (home / "images").mkdir()
-    (home / "images" / BASE_IMAGE.name).symlink_to(BASE_IMAGE)
+    # Always under the plain name: the scratch home has no pointer to a rebuilt version.
+    (home / "images" / "debian-desktop.qcow2").symlink_to(BASE_IMAGE)
     model, internal_dns = ScriptedModel(), FakeInternalDns()
     (home / "config.yaml").write_text(yaml.safe_dump({
         "providers": {"scripted": {

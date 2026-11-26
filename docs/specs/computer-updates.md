@@ -7,7 +7,8 @@
 > new image, nothing was left behind, and stopping the computer during the update was refused.
 > The rest of the e2e suite still passes. Unit tests cover packing and unpacking, refusing
 > archives that reach outside the carried places, image versions and their removal, a rebuild
-> beside an image in use, and an update that fails while unpacking (the old disk is put back).
+> beside an image in use, an update that fails while unpacking (the old disk is put back), and
+> one cut short by quitting the app (undone at the next start).
 >
 > Not checked: a real rebuild through the app (the e2e test uses an APFS clone as the "new"
 > image, not a 20-minute build); the Settings › Computers page in the running app; carrying
@@ -32,7 +33,7 @@ agent ends up on the new image with its Shared folder, databases and memory.
   `disk.previous.qcow2` → started on a fresh disk → archive sent, `carry.unpack` checks the
   SHA-256 and extracts with tarfile's `data` filter, only into `~/Shared`, `~/Databases` and
   `~/.agent-office/memory.sqlite` → old disk and archive deleted. Any failure after the swap
-  puts the old disk back.
+  puts the old disk back. If the app quits mid-update, the next start does the same.
 - **Trust:** the archive comes from the agent's computer. The host only sizes and checksums
   it (at most 4 GB, with 2 GB spare on the Mac) and never opens it.
 

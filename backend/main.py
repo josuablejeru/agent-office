@@ -80,6 +80,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if app.state.dns is not None:
         await app.state.dns.start()
         app.state.vm_manager.dns_settings = app.state.dns.guest_settings
+    # Before the VM states: an interrupted update may have left the wrong disk in place.
+    await app.state.computer_updater.recover_interrupted()
     await recover_vm_states(app)
     app.state.run_service.mark_interrupted()
     app.state.channels.ensure_default()

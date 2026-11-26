@@ -341,6 +341,33 @@ def test_an_agent_moves_to_the_rebuilt_image_with_its_files(tmp_path: Path, monk
 
 
 @needs_qemu_img
+def test_an_update_cut_short_by_quitting_is_undone_at_the_next_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    updater, vms, engine, agent_id = updater_for(tmp_path, monkeypatch)
+    settings = updater._settings  # noqa: SLF001
+    with Session(engine) as session:
+        agent = session.get(Agent, agent_id)
+    disk = Path(agent.vm_disk_path)
+    old_home = vms.home(agent)
+    # As the app left it: old disk aside, a fresh computer running on the new image, an archive.
+    newer = "debian-desktop-20261126T101500Z"
+    make_image(settings.images_dir / f"{newer}.qcow2")
+    generations.set_current(settings, "debian-desktop", newer)
+    disk.rename(disk.with_name("disk.previous.qcow2"))
+    run(vms.start(agent))
+    (settings.agent_dir("ada") / "carry-over.tar.gz.partial").write_bytes(b"x")
+
+    assert run(updater.recover_interrupted()) == ["ada"]
+    assert generations.backing_file(disk) == settings.images_dir / "debian-desktop.qcow2"
+    assert vms.home(agent) == old_home and "ada" not in vms.running
+    assert not disk.with_name("disk.previous.qcow2").exists()
+    assert not list(settings.agent_dir("ada").glob("carry-over*"))
+    assert updater.status(agent_id).state == "failed" and "put back" in updater.status(agent_id).detail
+    assert run(updater.recover_interrupted()) == []  # nothing more to do
+
+
+@needs_qemu_img
 def test_a_failed_update_puts_the_old_computer_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     updater, vms, engine, agent_id = updater_for(tmp_path, monkeypatch)
     settings = updater._settings  # noqa: SLF001
