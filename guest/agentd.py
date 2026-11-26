@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from guest.browser import Browser
+from guest.carry import carry_clear, carry_pack, carry_read_chunk, carry_unpack, carry_write_chunk
 from guest.certificates import configure_certificates
 from guest.database import db_list, db_sql
 from guest.files import file_list, file_read, file_write
@@ -84,6 +85,12 @@ OPERATIONS: dict[str, Operation] = {
     "shared.finish": shared_finish,
     "shared.stat": shared_stat,
     "shared.read_chunk": shared_read_chunk,
+    # Carrying the agent's files to a new computer when its system image is updated.
+    "carry.pack": carry_pack,
+    "carry.read_chunk": carry_read_chunk,
+    "carry.write_chunk": carry_write_chunk,
+    "carry.unpack": carry_unpack,
+    "carry.clear": carry_clear,
 }
 
 

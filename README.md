@@ -453,6 +453,14 @@ Settings shows the internal domains currently in effect.
   Artifactory fetches the files on first use.
   Where every image came from is recorded in
   `images/debian-desktop.source.json` and shown in Settings.
+- **Rebuilding the system image and updating agents' computers.** Settings ›
+  Computers › Rebuild system image builds a new version beside the one in use
+  (for example after setting up a Debian mirror or company certificates);
+  agents keep working meanwhile, and new agents start from it. Update (or
+  Update all) then gives an agent a fresh computer on the new image and carries
+  over its Shared folder, databases and memory; programs it installed, browser
+  sign-ins and other files on its computer are not kept. An old image is
+  deleted once no agent uses it. See `docs/specs/computer-updates.md`.
 - **Signing in is separate.** The agent's Chrome has none of your sessions or
   certificates. Use Take control to log in once; tools that require a
   company-managed device or a client certificate will refuse it.

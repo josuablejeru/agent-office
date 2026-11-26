@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from backend.agents.manager import AgentAlreadyExists, AgentNotFound, UnknownProvider
 from backend.agents.models import AgentCreate, AgentRead, AgentUpdate
 from backend.agents.runtime import RunService
-from backend.api.deps import AgentManagerDep, RunServiceDep, SettingsDep, VMManagerDep
+from backend.api.deps import AgentManagerDep, ComputerUpdaterDep, RunServiceDep, SettingsDep, VMManagerDep
 from backend.db.models import Agent
 from backend.policy.permissions import ALWAYS_ASKS, GROUPS
 from backend.vm.errors import VMError
@@ -92,9 +92,12 @@ async def delete_agent(
     manager: AgentManagerDep,
     vms: VMManagerDep,
     runs: RunServiceDep,
+    updater: ComputerUpdaterDep,
     confirm: bool = Query(default=False),
 ) -> None:
     """Deletes the agent and its VM disk. Requires `?confirm=true`."""
+    if updater.is_updating(agent_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This agent's computer is being updated. Wait until it is done.")
     if not confirm:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,

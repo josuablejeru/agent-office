@@ -10,6 +10,9 @@
 #
 # Usage: scripts/create-base-image.sh [--force]
 #   --force   rebuild an existing base image (refused while agent disks use it)
+#   IMAGE_NAME=debian-desktop-<time>   build a new version beside the one in
+#             use; the app does this to rebuild while agents exist, then makes
+#             it current (images/debian-desktop.current)
 #   EXTRA_CA_FILE=roots.pem   also trust these root certificates while
 #             downloading (a company network that inspects HTTPS); the app
 #             passes the roots this Mac trusts beyond the public ones
@@ -73,7 +76,7 @@ FIRMWARE="$(dirname "$(command -v qemu-system-aarch64)")/../share/qemu/edk2-aarc
 [ -f "$FIRMWARE" ] || die "UEFI firmware not found at $FIRMWARE"
 
 if [ -e "$BASE_IMAGE" ]; then
-  if compgen -G "$HOME_DIR/agents/*/disk.qcow2" >/dev/null; then
+  if compgen -G "$HOME_DIR/agents/*/disk*.qcow2" >/dev/null; then
     die "$BASE_IMAGE is the backing file of existing agent disks; replacing it would corrupt them"
   fi
   $force || die "$BASE_IMAGE already exists (use --force to rebuild)"

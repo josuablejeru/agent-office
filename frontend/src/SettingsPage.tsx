@@ -4,14 +4,16 @@ import { McpServers } from "./McpServers";
 import { ModelSwitchingSettings } from "./ModelList";
 import { ModelTest } from "./ModelTest";
 import { PackageRepositorySettings } from "./PackageRepository";
+import { SystemImageSettings } from "./SystemImage";
 import type { AppSettings, DnsStatus, Provider, UpdateStatus } from "./types";
 
-export type SettingsSection = "general" | "network" | "packages" | "models" | "routing" | "mcp";
+export type SettingsSection = "general" | "network" | "packages" | "computers" | "models" | "routing" | "mcp";
 
 export const SETTINGS_SECTIONS: [SettingsSection, string][] = [
   ["general", "General"],
   ["network", "Network"],
   ["packages", "Package repository"],
+  ["computers", "Computers"],
   ["models", "Model providers"],
   ["routing", "Models & routing"],
   ["mcp", "MCP servers"],
@@ -393,6 +395,12 @@ export function SettingsPage({ providers, section, onChanged }: Props) {
         <h3>Package repository (JFrog Artifactory)</h3>
         <PackageRepositorySettings />
 
+          </>
+        )}
+        {section === "computers" && (
+          <>
+            <h3>Computers</h3>
+            <SystemImageSettings />
           </>
         )}
         {section === "routing" && (

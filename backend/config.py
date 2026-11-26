@@ -181,7 +181,10 @@ class Settings(BaseModel):
         return self._socket_path(f"{agent_id}.vnc")
 
     def base_image_path(self, image: str) -> Path:
-        return self.images_dir / f"{image}.qcow2"
+        """The current version of a system image: the one new computers start from."""
+        from backend.vm.generations import current_version
+
+        return self.images_dir / f"{current_version(self, image)}.qcow2"
 
     def ensure_layout(self) -> None:
         """Create the data directory tree and a default config.yaml if missing."""

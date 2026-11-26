@@ -17,6 +17,7 @@ from backend.keystore import KeyStore
 from backend.policy.approvals import ApprovalBroker
 from backend.vm.base_image import BaseImageBuilder
 from backend.vm.lifecycle import VMManager
+from backend.vm.update import ComputerUpdater
 
 
 def get_settings(request: Request) -> Settings:
@@ -52,6 +53,10 @@ def get_base_image_builder(request: Request) -> BaseImageBuilder:
     return request.app.state.base_image_builder
 
 
+def get_computer_updater(request: Request) -> ComputerUpdater:
+    return request.app.state.computer_updater
+
+
 def require_api_token(request: Request) -> None:
     """Reject requests that do not carry the local API token."""
     header = request.headers.get("Authorization", "")
@@ -69,6 +74,7 @@ RunServiceDep = Annotated[RunService, Depends(get_run_service)]
 ChannelServiceDep = Annotated[ChannelService, Depends(get_channel_service)]
 KeyStoreDep = Annotated[KeyStore, Depends(get_key_store)]
 BaseImageBuilderDep = Annotated[BaseImageBuilder, Depends(get_base_image_builder)]
+ComputerUpdaterDep = Annotated[ComputerUpdater, Depends(get_computer_updater)]
 ApprovalBrokerDep = Annotated[ApprovalBroker, Depends(get_approval_broker)]
 
 

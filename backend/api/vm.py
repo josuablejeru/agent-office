@@ -16,6 +16,7 @@ from backend.agents.routing import RoutingSettings, load_routing, switching_enab
 from backend.api.deps import (
     AgentManagerDep,
     BaseImageBuilderDep,
+    ComputerUpdaterDep,
     KeyStoreDep,
     RunServiceDep,
     SessionDep,
@@ -43,6 +44,8 @@ from backend.vm.capabilities import Capabilities, detect_capabilities
 from backend.vm.errors import VMError
 from backend.vm.guest import GuestClient
 from backend.vm.lifecycle import VMManager, VMStatus
+from backend.vm.update import ComputerUpdater, UpdateError
+from backend.vm.update import UpdateStatus as ComputerUpdateStatus
 
 router = APIRouter(prefix="/api", tags=["system"])
 log = get_logger("providers")
@@ -507,6 +510,73 @@ async def build_base_image(builder: BaseImageBuilderDep) -> BaseImageStatus:
     return builder.start()
 
 
+@router.post("/system/base-image/rebuild")
+async def rebuild_base_image(builder: BaseImageBuilderDep, updater: ComputerUpdaterDep) -> BaseImageStatus:
+    """Build a new version of the system image beside the one in use.
+
+    Agents' computers keep working on theirs; new computers start from the new
+    one, and existing ones move to it when they are updated.
+    """
+    if updater.any_updating():
+        raise HTTPException(status.HTTP_409_CONFLICT, "Agents' computers are being updated. Rebuild when they are done.")
+    return builder.start(rebuild=True)
+
+
+class ComputerState(BaseModel):
+    agent_id: int
+    name: str
+    # Made on an older system image than the current one.
+    outdated: bool
+    update: ComputerUpdateStatus
+
+
+class ComputerUpdateRequest(BaseModel):
+    # Which agents; none: every agent whose computer is on an older system image.
+    agent_ids: list[int] | None = None
+
+
+async def _computers(manager: AgentManager, updater: ComputerUpdater) -> list[ComputerState]:
+    states = []
+    for agent in manager.list():
+        assert agent.id is not None
+        outdated = await asyncio.to_thread(updater.is_outdated, agent)
+        states.append(ComputerState(agent_id=agent.id, name=agent.name, outdated=outdated,
+                                    update=updater.status(agent.id)))
+    return states
+
+
+@router.get("/system/computers")
+async def computers(manager: AgentManagerDep, updater: ComputerUpdaterDep) -> list[ComputerState]:
+    """Every agent's computer: whether it is on the current system image, and any update."""
+    return await _computers(manager, updater)
+
+
+@router.post("/system/computers/update")
+async def update_computers(
+    payload: ComputerUpdateRequest, manager: AgentManagerDep, updater: ComputerUpdaterDep
+) -> list[ComputerState]:
+    """Move agents' computers onto the current system image, keeping their own files.
+
+    Each gets a fresh disk; its Shared folder, databases and memory are carried
+    over. Anything else on its computer (installed programs, browser sign-ins,
+    snapshots) is not.
+    """
+    states = await _computers(manager, updater)
+    known_ids = {state.agent_id for state in states}
+    if payload.agent_ids is None:
+        wanted = [state.agent_id for state in states if state.outdated]
+    else:
+        unknown = set(payload.agent_ids) - known_ids
+        if unknown:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"No agent with id {sorted(unknown)[0]}.")
+        wanted = list(dict.fromkeys(payload.agent_ids))
+    try:
+        updater.request(wanted)
+    except UpdateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return await _computers(manager, updater)
+
+
 @router.get("/providers/{name}/models")
 async def list_provider_models(name: str, settings: SettingsDep, keys: KeyStoreDep, session: SessionDep) -> list[str]:
     """Models the provider offers, for populating the model picker."""
@@ -546,6 +616,11 @@ def _load(agent_id: int, manager: AgentManager) -> Agent:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 
+def _not_updating(agent_id: int, updater: ComputerUpdater) -> None:
+    if updater.is_updating(agent_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This agent's computer is being updated. Wait until it is done.")
+
+
 async def _run(
     agent: Agent,
     manager: AgentManager,
@@ -563,7 +638,10 @@ async def _run(
 
 
 @router.post("/agents/{agent_id}/vm/start", tags=["vm"])
-async def start_vm(agent_id: int, manager: AgentManagerDep, vms: VMManagerDep) -> AgentRead:
+async def start_vm(
+    agent_id: int, manager: AgentManagerDep, vms: VMManagerDep, updater: ComputerUpdaterDep
+) -> AgentRead:
+    _not_updating(agent_id, updater)
     agent = _load(agent_id, manager)
     if await vms.status(agent) != VMStatus.RUNNING:
         try:
@@ -575,8 +653,9 @@ async def start_vm(agent_id: int, manager: AgentManagerDep, vms: VMManagerDep) -
 
 @router.post("/agents/{agent_id}/vm/stop", tags=["vm"])
 async def stop_vm(
-    agent_id: int, manager: AgentManagerDep, vms: VMManagerDep, runs: RunServiceDep
+    agent_id: int, manager: AgentManagerDep, vms: VMManagerDep, runs: RunServiceDep, updater: ComputerUpdaterDep
 ) -> AgentRead:
+    _not_updating(agent_id, updater)
     # A run left going would keep failing against a computer that is gone.
     await runs.cancel(agent_id)
     return await _run(_load(agent_id, manager), manager, vms, vms.stop)
@@ -584,8 +663,9 @@ async def stop_vm(
 
 @router.post("/agents/{agent_id}/vm/restart", tags=["vm"])
 async def restart_vm(
-    agent_id: int, manager: AgentManagerDep, vms: VMManagerDep, runs: RunServiceDep
+    agent_id: int, manager: AgentManagerDep, vms: VMManagerDep, runs: RunServiceDep, updater: ComputerUpdaterDep
 ) -> AgentRead:
+    _not_updating(agent_id, updater)
     agent = _load(agent_id, manager)
     await runs.cancel(agent_id)
     if agent.vm_daemon_port is None:
@@ -598,8 +678,10 @@ async def restart_vm(
 
 @router.post("/agents/{agent_id}/vm/snapshot", tags=["vm"])
 async def snapshot_vm(
-    agent_id: int, payload: SnapshotRequest, manager: AgentManagerDep, vms: VMManagerDep
+    agent_id: int, payload: SnapshotRequest, manager: AgentManagerDep, vms: VMManagerDep,
+    updater: ComputerUpdaterDep,
 ) -> AgentRead:
+    _not_updating(agent_id, updater)
     return await _run(
         _load(agent_id, manager), manager, vms, lambda agent: vms.snapshot(agent, payload.name)
     )

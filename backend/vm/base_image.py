@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from backend.config import Settings
 from backend.logging_config import get_logger
+from backend.vm import generations
 
 log = get_logger("vm")
 
@@ -31,6 +32,10 @@ class BaseImageStatus(BaseModel):
     detail: str = ""
     # Where the image agents boot from came from, for tracing it back.
     source: str = ""
+    # The file new computers start from (debian-desktop, or debian-desktop-<time> once rebuilt).
+    version: str = ""
+    # A rebuild is running beside an image that is already in use.
+    rebuilding: bool = False
 
 
 class BaseImageBuilder:
@@ -50,6 +55,7 @@ class BaseImageBuilder:
         self._base_image = base_image
         self._task: asyncio.Task[None] | None = None
         self._detail = ""
+        self._rebuilding = False
 
     @property
     def log_path(self) -> Path:
@@ -57,7 +63,8 @@ class BaseImageBuilder:
 
     @property
     def source_path(self) -> Path:
-        return self._settings.images_dir / f"{DEFAULT_IMAGE}.source.json"
+        version = generations.current_version(self._settings, DEFAULT_IMAGE)
+        return self._settings.images_dir / f"{version}.source.json"
 
     def source(self) -> str:
         """Where the current image was built from, in words."""
@@ -70,12 +77,19 @@ class BaseImageBuilder:
 
     def status(self) -> BaseImageStatus:
         ready = self._settings.base_image_path(DEFAULT_IMAGE).exists()
+        building = self.building
         return BaseImageStatus(
             ready=ready,
-            building=self._task is not None and not self._task.done(),
+            building=building,
             detail=self._detail,
             source=self.source() if ready else "",
+            version=generations.current_version(self._settings, DEFAULT_IMAGE) if ready else "",
+            rebuilding=building and self._rebuilding,
         )
+
+    @property
+    def building(self) -> bool:
+        return self._task is not None and not self._task.done()
 
     def log_tail(self, lines: int = 80) -> list[str]:
         """The end of the last build's output, for the setup banner."""
@@ -88,19 +102,35 @@ class BaseImageBuilder:
         cleaned = [line.rsplit("\r", 1)[-1].rstrip() for line in text.split("\n")]
         return [line for line in cleaned if line.strip()][-lines:]
 
-    def start(self) -> BaseImageStatus:
+    def start(self, rebuild: bool = False) -> BaseImageStatus:
+        """Build the system image; with `rebuild`, a new version beside the one in use.
+
+        A rebuild leaves every agent's computer as it is: new computers start
+        from the new version once it is finished, and existing ones move to it
+        when they are updated.
+        """
         current = self.status()
-        if not current.ready and not current.building:
-            free = shutil.disk_usage(self._settings.home).free
-            if free < BUILD_FREE_BYTES:
-                self._detail = (
-                    f"Not enough disk space: {free / 1024**3:.1f} GB free, "
-                    f"{BUILD_FREE_BYTES // 1024**3} GB needed."
-                )
-                return self.status()
-            self._detail = "Starting…"
-            self._task = asyncio.create_task(self._build())
+        if current.building or (current.ready and not rebuild):
+            return current
+        free = shutil.disk_usage(self._settings.home).free
+        if free < BUILD_FREE_BYTES:
+            self._detail = (
+                f"Not enough disk space: {free / 1024**3:.1f} GB free, "
+                f"{BUILD_FREE_BYTES // 1024**3} GB needed."
+            )
+            return self.status()
+        # The first image keeps the plain name; later ones get the time they were built.
+        version = generations.new_version(DEFAULT_IMAGE) if current.ready else DEFAULT_IMAGE
+        self._rebuilding = current.ready
+        self._detail = "Starting…"
+        self._task = asyncio.create_task(self._build(version))
         return self.status()
+
+    def remove_unused_images(self) -> list[str]:
+        """Delete system images no agent's computer uses any more (never during a build)."""
+        if self.building:
+            return []
+        return generations.remove_unused(self._settings, DEFAULT_IMAGE)
 
     def start_import(self, source: str) -> BaseImageStatus:
         """Use an image built elsewhere (another Mac), instead of building one here.
@@ -122,7 +152,7 @@ class BaseImageBuilder:
     def _check_import(self, source: Path) -> str | None:
         if not source.is_file():
             return f"Import failed: {source} is not a file."
-        if any(self._settings.home.glob("agents/*/disk.qcow2")):
+        if generations.agent_disks(self._settings):
             return "Import failed: agents' disks already depend on an image here."
         try:
             info = json.loads(subprocess.run(
@@ -162,16 +192,22 @@ class BaseImageBuilder:
             self._detail = f"Import failed: {exc}"
             log.exception("base image import failed")
 
-    async def _build(self) -> None:
+    async def _build(self, version: str = DEFAULT_IMAGE) -> None:
         try:
-            await self._run_script()
+            if await self._run_script(version) and version != DEFAULT_IMAGE:
+                if self._settings.images_dir.joinpath(f"{version}.qcow2").is_file():
+                    generations.set_current(self._settings, DEFAULT_IMAGE, version)
+                    log.info("system image rebuilt", extra={"image": version})
+                    self._detail = "Rebuilt. Agents' computers move to it when they are updated."
+                    generations.remove_unused(self._settings, DEFAULT_IMAGE)
         except Exception as exc:  # noqa: BLE001 - the status must end up saying what happened
             self._detail = f"Build failed: {exc}"
             log.exception("base image build crashed")
 
-    async def _run_script(self) -> None:
-        log.info("base image build started")
-        env = {**os.environ, "AGENT_OFFICE_HOME": str(self._settings.home), "IMAGE_NAME": DEFAULT_IMAGE}
+    async def _run_script(self, version: str = DEFAULT_IMAGE) -> bool:
+        """Run the build script; True if it succeeded."""
+        log.info("base image build started", extra={"image": version})
+        env = {**os.environ, "AGENT_OFFICE_HOME": str(self._settings.home), "IMAGE_NAME": version}
         # Behind a company's HTTPS inspection, the downloads need the company's root too.
         bundle = await self._certificates() if self._certificates else ""
         if bundle:
@@ -193,7 +229,7 @@ class BaseImageBuilder:
             except ImageError as exc:
                 self._detail = f"Build failed: {exc}"
                 self.log_path.write_text(f"error: {exc}\n")
-                return
+                return False
             if chosen:
                 image, credentials = chosen
                 credentials_file = self._settings.images_dir / ".artifactory-curl"
@@ -208,12 +244,12 @@ class BaseImageBuilder:
                 else:  # Debian's own image through a mirror repository
                     env.update({"DEBIAN_MIRROR": image.url, "DEBIAN_MIRROR_CURL_CONFIG": str(credentials_file)})
         try:
-            await self._run_build(env)
+            return await self._run_build(env)
         finally:
             if credentials_file is not None:
                 credentials_file.unlink(missing_ok=True)
 
-    async def _run_build(self, env: dict[str, str]) -> None:
+    async def _run_build(self, env: dict[str, str]) -> bool:
         with self.log_path.open("w") as build_log:
             process = await asyncio.create_subprocess_exec(
                 "/bin/bash", str(self._script),
@@ -239,3 +275,4 @@ class BaseImageBuilder:
             reason = errors[-1].removeprefix("error: ") if errors else self._detail
             self._detail = f"Build failed: {reason}"
         log.info("base image build finished", extra={"exit_code": code})
+        return code == 0

@@ -1761,3 +1761,34 @@ textarea:focus {
   font-weight: 600;
   margin: 4px 0;
 }
+
+.computer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.computer-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.computer-list .name {
+  font-weight: 600;
+  min-width: 8em;
+}
+
+.computer-list .state {
+  flex: 1;
+  color: var(--muted);
+}
+
+.confirm-box {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}

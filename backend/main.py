@@ -45,6 +45,7 @@ from backend.providers.registry import build_provider
 from backend.updates import Updater
 from backend.vm.base_image import BaseImageBuilder
 from backend.vm.lifecycle import QemuVMManager, VMStatus
+from backend.vm.update import ComputerUpdater
 
 log = get_logger("app")
 
@@ -169,6 +170,11 @@ def create_app(
         provider_factory=provider_factory,
         channels=app.state.channels,
     )
+    # Moves agents' computers onto a rebuilt system image, keeping their files.
+    app.state.computer_updater = ComputerUpdater(
+        engine, settings, app.state.vm_manager, app.state.run_service,
+        building=lambda: app.state.base_image_builder.building,
+    )
 
     def busy() -> str | None:
         """What an update would interrupt right now."""
@@ -179,6 +185,8 @@ def create_app(
             return f"{', '.join(working)} {'is' if len(working) == 1 else 'are'} working"
         if app.state.base_image_builder.status().building:
             return "the system image is being built"
+        if any(app.state.computer_updater.is_updating(a.id) for a in agents if a.id is not None):
+            return "agents' computers are being updated"
         return None
 
     app.state.updater = Updater(settings, busy=busy)

@@ -165,6 +165,17 @@ export interface BaseImageStatus {
   building: boolean;
   detail: string;
   source: string;
+  // The image file new computers start from (debian-desktop, or debian-desktop-<time> once rebuilt).
+  version: string;
+  rebuilding: boolean;
+}
+
+export interface ComputerState {
+  agent_id: number;
+  name: string;
+  // Made on an older system image than the current one.
+  outdated: boolean;
+  update: { state: "idle" | "queued" | "running" | "done" | "failed"; detail: string };
 }
 
 export interface Capabilities {

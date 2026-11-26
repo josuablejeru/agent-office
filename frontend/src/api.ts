@@ -2,6 +2,7 @@ import type {
   Agent,
   AppSettings,
   BaseImageStatus,
+  ComputerState,
   Channel,
   ChannelMessage,
   DnsStatus,
@@ -244,6 +245,10 @@ export const api = {
   importBaseImage: (path: string) =>
     request<BaseImageStatus>("/api/system/base-image/import", { method: "POST", body: JSON.stringify({ path }) }),
   buildBaseImage: () => request<BaseImageStatus>("/api/system/base-image", post()),
+  rebuildBaseImage: () => request<BaseImageStatus>("/api/system/base-image/rebuild", post()),
+  computers: () => request<ComputerState[]>("/api/system/computers"),
+  updateComputers: (agent_ids: number[] | null) =>
+    request<ComputerState[]>("/api/system/computers/update", post({ agent_ids })),
   listModels: (provider: string) => request<string[]>(`/api/providers/${provider}/models`),
   capabilities: () => request<Capabilities>("/api/system/capabilities"),
   vncUrl: (id: number) => {

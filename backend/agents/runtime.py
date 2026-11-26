@@ -192,10 +192,21 @@ class RunService:
         self._queued_mentions: dict[int, tuple[ChannelMessage, int]] = {}
         # Runs that already posted to their channel themselves (no automatic reply then).
         self._posted_in_run: set[int] = set()
+        # Agents whose computer is being updated, with why no run may start.
+        self._held: dict[int, str] = {}
 
     def is_busy(self, agent_id: int) -> bool:
+        if agent_id in self._held:
+            return True
         task = self._tasks.get(agent_id)
         return task is not None and not task.done()
+
+    def hold(self, agent_id: int, reason: str) -> None:
+        """Start no runs for this agent (its computer is being replaced) until released."""
+        self._held[agent_id] = reason
+
+    def release(self, agent_id: int) -> None:
+        self._held.pop(agent_id, None)
 
     def _gate(self, agent_id: int) -> asyncio.Event:
         if agent_id not in self._may_act:
@@ -236,6 +247,8 @@ class RunService:
         agent's own setting); `route_text` is what the router may read, when it
         is not the task itself (only the user's own words, never colleagues' posts).
         """
+        if agent_id in self._held:
+            raise RunError(self._held[agent_id])
         if self.is_busy(agent_id):
             raise RunError("This agent is already working on a message.")
         if (provider is None) != (model is None):
