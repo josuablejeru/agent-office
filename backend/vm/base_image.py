@@ -242,7 +242,8 @@ class BaseImageBuilder:
                         "BASE_IMAGE_NAME": image.path, "BASE_IMAGE_CURL_CONFIG": str(credentials_file),
                     })
                 else:  # Debian's own image through a mirror repository
-                    env.update({"DEBIAN_MIRROR": image.url, "DEBIAN_MIRROR_CURL_CONFIG": str(credentials_file)})
+                    env.update({"DEBIAN_MIRROR": image.url, "DEBIAN_IMAGE_FILE": image.image,
+                                "DEBIAN_MIRROR_CURL_CONFIG": str(credentials_file)})
         try:
             return await self._run_build(env)
         finally:

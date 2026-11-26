@@ -447,10 +447,14 @@ Settings shows the internal domains currently in effect.
   or raw; an x86_64 image is stopped within seconds with that explanation.
   Where Debian's public server is blocked but Artifactory has a remote
   repository for it (`https://cloud.debian.org/images/cloud/`), enter just
-  that repository's name as the base image instead: the build then fetches
-  Debian's own cloud image and its `SHA512SUMS` through it, with the same
-  checks as from Debian directly. The repository may start out empty;
-  Artifactory fetches the files on first use.
+  that repository's name as the base image instead. The app reads the newest
+  Debian build from Debian's own list (or, if the Mac cannot reach Debian,
+  from what the repository lists or has cached), asks for that build's dated
+  folder through the repository, which fetches it from Debian if it does not
+  have it yet, and downloads the image and its `SHA512SUMS` from Artifactory,
+  with the same checks as from Debian directly. The remote may point at
+  `https://cloud.debian.org/images/cloud/`, at the release folder, or at the
+  site root; Test says which build it found and whether Artifactory has it.
   Where every image came from is recorded in
   `images/debian-desktop.source.json` and shown in Settings.
 - **Rebuilding the system image and updating agents' computers.** Settings ›

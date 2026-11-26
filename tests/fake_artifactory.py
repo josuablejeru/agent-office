@@ -46,6 +46,9 @@ class FakeArtifactory:
         self.storage_api = True  # False: a remote repository that has not cached the file yet
         self.checksum_header = True
         self.recorded_sha256: dict[str, str] = {}  # overrides, to publish a wrong checksum
+        # A remote repository: files it can fetch upstream but has not yet (not in its cache).
+        self.uncached: set[str] = set()
+        self.remote_listing = True  # "List Remote Folder Items" switched on
         expected = "Basic " + base64.b64encode(f"{username}:{token}".encode()).decode()
         wheel = probe_wheel()
         digest = hashlib.sha256(wheel).hexdigest()
@@ -70,7 +73,13 @@ class FakeArtifactory:
                 storage = "/artifactory/api/storage/"
                 if self.path.startswith(storage):
                     name = self.path[len(storage):]
-                    if name not in outer.files or not outer.storage_api:
+                    children = outer.children(name, cached_only=True)
+                    if children and outer.storage_api and name not in outer.files:
+                        body = json.dumps({"children": [
+                            {"uri": f"/{child}", "folder": folder} for child, folder in children]}).encode()
+                        self._send(200, body, "application/json")
+                        return True
+                    if name not in outer.files or not outer.storage_api or name in outer.uncached:
                         self._send(404)
                         return True
                     body = json.dumps({
@@ -80,7 +89,13 @@ class FakeArtifactory:
                     return True
                 name = self.path.removeprefix("/artifactory/")
                 if name not in outer.files:
+                    children = outer.children(name.rstrip("/"), cached_only=False)
+                    if children and outer.remote_listing and not head:
+                        links = "".join(f'<a href="{c}{"/" if f else ""}">{c}</a>\n' for c, f in children)
+                        self._send(200, f"<html><body><pre>{links}</pre></body></html>".encode())
+                        return True
                     return False
+                outer.uncached.discard(name)  # fetched through the remote: now in its cache
                 path = outer.files[name]
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
@@ -138,8 +153,21 @@ class FakeArtifactory:
             self.scheme = "https"
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
-    def publish(self, name: str, path: Path) -> None:
+    def publish(self, name: str, path: Path, cached: bool = True) -> None:
         self.files[name] = path
+        if not cached:
+            self.uncached.add(name)
+
+    def children(self, folder: str, cached_only: bool) -> list[tuple[str, bool]]:
+        """What a folder holds, as (name, is_folder)."""
+        prefix = folder.strip("/") + "/" if folder.strip("/") else ""
+        found: dict[str, bool] = {}
+        for name in self.files:
+            if not name.startswith(prefix) or (cached_only and name in self.uncached):
+                continue
+            first, _, rest = name[len(prefix):].partition("/")
+            found[first] = found.get(first, False) or bool(rest)
+        return sorted(found.items())
 
     def sha256(self, name: str) -> str:
         if name in self.recorded_sha256:

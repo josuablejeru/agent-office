@@ -328,39 +328,109 @@ def test_the_debian_release_is_the_one_the_build_script_uses() -> None:
     assert f'DEBIAN_VERSION="${{DEBIAN_VERSION:-{DEBIAN_VERSION}}}"' in script
 
 
-def debian_mirror_repository(tmp_path: Path, layout: str = "") -> tuple[FakeArtifactory, Artifactory]:
-    from backend.net.packages import DEBIAN_IMAGE, DEBIAN_RELEASE
+OLD, NEW = "20261116-2664", "20261123-2671"
 
-    sums = tmp_path / "SHA512SUMS"
-    sums.write_text(f"{'0' * 128}  debian-13-genericcloud-arm64.qcow2\n{'a' * 128}  {DEBIAN_IMAGE}\n")
+
+class FakeDebian:
+    """Debian's cloud image server: a plain folder listing of the release's dated builds."""
+
+    def __init__(self, root: Path, builds: list[str]) -> None:
+        import functools
+        import threading
+        from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+        for build in builds:
+            (root / "trixie" / build).mkdir(parents=True)
+        handler = functools.partial(SimpleHTTPRequestHandler, directory=str(root))
+        handler.log_message = lambda *args: None  # type: ignore[attr-defined]
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}"
+
+    def close(self) -> None:
+        self._server.shutdown()
+
+
+def debian_mirror_repository(
+    tmp_path: Path, layout: str = "trixie/", cached: tuple[str, ...] = (OLD,), upstream: tuple[str, ...] = (OLD, NEW)
+) -> tuple[FakeArtifactory, Artifactory]:
+    """A remote repository of Debian's cloud images: it can fetch `upstream`, and has `cached`."""
+    from backend.net.packages import debian_image_file
+
     fake = FakeArtifactory("jo", "tok")
-    fake.publish(f"debian-cloud/{layout}{DEBIAN_RELEASE}/latest/SHA512SUMS", sums)
+    for build in upstream:
+        folder = tmp_path / "upstream" / build
+        folder.mkdir(parents=True)
+        image = folder / debian_image_file(build)
+        image.write_bytes(b"QFI\xfb" + build.encode())
+        sums = folder / "SHA512SUMS"
+        sums.write_text(f"{'0' * 128}  debian-13-genericcloud-arm64-{build}.qcow2\n{'a' * 128}  {image.name}\n")
+        for path in (sums, image):
+            fake.publish(f"debian-cloud/{layout}{build}/{path.name}", path, cached=build in cached)
     repository = Artifactory(url=fake.url(), username="jo", pypi_repo="pypi-remote", base_image="debian-cloud")
     return fake, repository
 
 
-@pytest.mark.parametrize("layout", ["", "images/cloud/"])
-def test_a_debian_mirror_repository_is_found_by_its_name(tmp_path: Path, layout: str) -> None:
-    from backend.net.packages import ImageError, debian_mirror
+@pytest.mark.parametrize("layout", ["trixie/", "images/cloud/trixie/", ""])
+def test_the_newest_debian_build_is_fetched_through_the_mirror(tmp_path: Path, layout: str) -> None:
+    """Debian has a newer build than Artifactory's cache: that one is asked for through the remote."""
+    from backend.net.packages import debian_mirror
 
     fake, repository = debian_mirror_repository(tmp_path, layout)
+    debian = FakeDebian(tmp_path / "debian", [OLD, NEW])
     try:
-        mirror = asyncio.run(debian_mirror(repository, "tok"))
-        assert mirror.url == f"{fake.url()}/debian-cloud/{layout}trixie/latest"
-        with pytest.raises(ImageError, match="refused the username or token"):
-            asyncio.run(debian_mirror(repository, "wrong"))
-        with pytest.raises(ImageError, match="does not serve Debian's cloud images"):
-            asyncio.run(debian_mirror(repository.model_copy(update={"base_image": "other"}), "tok"))
+        mirror = asyncio.run(debian_mirror(repository, "tok", debian_url=debian.url))
+        assert mirror.build == NEW and mirror.newest_from == "Debian" and not mirror.cached
+        assert mirror.url == f"{fake.url()}/debian-cloud/{layout}{NEW}"
+        assert mirror.image == f"debian-13-generic-arm64-{NEW}.qcow2"
+        assert "latest" not in " ".join(fake.paths())  # a dated folder, never "latest"
+    finally:
+        fake.close()
+        debian.close()
+
+
+def test_without_debian_the_newest_build_artifactory_knows_is_used(tmp_path: Path) -> None:
+    from backend.net.packages import debian_mirror
+
+    fake, repository = debian_mirror_repository(tmp_path)
+    try:
+        # Debian out of reach, but the remote lists Debian's builds.
+        mirror = asyncio.run(debian_mirror(repository, "tok", debian_url="http://127.0.0.1:9"))
+        assert mirror.build == NEW and mirror.newest_from == "Artifactory"
+        # No listing either: what Artifactory has cached.
+        fake.remote_listing = False
+        fake.uncached.update(n for n in fake.files if NEW in n)
+        mirror = asyncio.run(debian_mirror(repository, "tok", debian_url="http://127.0.0.1:9"))
+        assert mirror.build == OLD and mirror.cached
     finally:
         fake.close()
 
 
-def test_the_build_gets_the_debian_mirror_and_credentials(tmp_path: Path) -> None:
+def test_a_debian_mirror_that_cannot_serve_says_what_it_tried(tmp_path: Path) -> None:
+    from backend.net.packages import ImageError, debian_mirror
+
+    fake, repository = debian_mirror_repository(tmp_path)
+    debian = FakeDebian(tmp_path / "debian", [OLD, NEW])
+    try:
+        with pytest.raises(ImageError, match="refused the username or token"):
+            asyncio.run(debian_mirror(repository, "wrong", debian_url=debian.url))
+        with pytest.raises(ImageError, match=r"does not serve Debian's cloud images: tried other/trixie/20261123"):
+            asyncio.run(debian_mirror(repository.model_copy(update={"base_image": "other"}), "tok",
+                                      debian_url=debian.url))
+    finally:
+        fake.close()
+        debian.close()
+
+
+def test_the_build_gets_the_debian_mirror_and_credentials(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from backend.keystore import KeyStore
+    from backend.net import packages
     from backend.net.packages import PackageSource
     from tests.test_agents_api import FakeKeychain
 
     fake, repository = debian_mirror_repository(tmp_path)
+    debian = FakeDebian(tmp_path / "debian", [OLD, NEW])
+    monkeypatch.setattr(packages, "DEBIAN_CLOUD", debian.url)
     try:
         settings = Settings(home=tmp_path / "home")
         settings.ensure_layout()
@@ -370,7 +440,7 @@ def test_the_build_gets_the_debian_mirror_and_credentials(tmp_path: Path) -> Non
         script = tmp_path / "build.sh"
         script.write_text(
             "#!/bin/bash\n"
-            'echo "mirror=$DEBIAN_MIRROR image=${BASE_IMAGE_URL:-none}"\n'
+            'echo "mirror=$DEBIAN_MIRROR file=$DEBIAN_IMAGE_FILE image=${BASE_IMAGE_URL:-none}"\n'
             'echo "mode=$(stat -f %Lp "$DEBIAN_MIRROR_CURL_CONFIG")"\n'
         )
 
@@ -381,7 +451,9 @@ def test_the_build_gets_the_debian_mirror_and_credentials(tmp_path: Path) -> Non
 
         asyncio.run(scenario())
         log = (settings.images_dir / "build.log").read_text()
-        assert f"mirror={fake.url()}/debian-cloud/trixie/latest image=none" in log and "mode=600" in log
+        assert f"mirror={fake.url()}/debian-cloud/trixie/{NEW} file=debian-13-generic-arm64-{NEW}.qcow2 image=none" \
+            in log and "mode=600" in log
         assert not (settings.images_dir / ".artifactory-curl").exists()
     finally:
         fake.close()
+        debian.close()

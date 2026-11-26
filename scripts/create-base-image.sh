@@ -21,11 +21,12 @@
 #             Debian's public one: its address, the SHA-256 Artifactory records
 #             for it (required: it is refused otherwise), a curl config file
 #             with the credentials, and its name for the log
-#   DEBIAN_MIRROR, DEBIAN_MIRROR_CURL_CONFIG
+#   DEBIAN_MIRROR, DEBIAN_IMAGE_FILE, DEBIAN_MIRROR_CURL_CONFIG
 #             fetch Debian's cloud image and its SHA512SUMS from this folder
-#             (a mirror of .../images/cloud/<release>/latest, e.g. a remote
-#             repository in Artifactory) instead of cloud.debian.org, with the
-#             credentials in this curl config file
+#             (one build's dated folder, .../images/cloud/<release>/<build>,
+#             through a remote repository in Artifactory) instead of
+#             cloud.debian.org: the image's file name there, and a curl config
+#             file with the credentials
 #   PIP_INDEX_URL=https://user:token@host/artifactory/api/pypi/repo/simple
 #             fetch the agent software's Python packages from a company
 #             repository instead of the public index (set in the app's Settings)
@@ -56,7 +57,7 @@ GUEST_PIP_PACKAGES=("websockets==17.2" "playwright==1.63.0")
 MIRROR="${DEBIAN_MIRROR:-https://cloud.debian.org/images/cloud/${DEBIAN_RELEASE}/latest}"
 MIRROR_CURL=()
 [ -n "${DEBIAN_MIRROR_CURL_CONFIG:-}" ] && MIRROR_CURL=(-K "$DEBIAN_MIRROR_CURL_CONFIG")
-CLOUD_IMAGE="debian-${DEBIAN_VERSION}-generic-arm64.qcow2"
+CLOUD_IMAGE="${DEBIAN_IMAGE_FILE:-debian-${DEBIAN_VERSION}-generic-arm64.qcow2}"
 OK_MARKER="AGENT_OFFICE_PROVISION_OK"
 
 IMAGES_DIR="$HOME_DIR/images"
@@ -69,6 +70,7 @@ force=false
 [ "${1:-}" = "--force" ] && force=true
 
 die() { echo "error: $*" >&2; exit 1; }
+[[ "$CLOUD_IMAGE" =~ ^debian-[0-9]+-generic-arm64(-[0-9]{8}-[0-9]+)?\.qcow2$ ]] || die "unexpected image name $CLOUD_IMAGE"
 
 command -v qemu-system-aarch64 >/dev/null || die "qemu-system-aarch64 not found (brew install qemu)"
 command -v qemu-img >/dev/null || die "qemu-img not found (brew install qemu)"

@@ -33,9 +33,28 @@ IMAGE_PATH = (r"^$|^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 DEBIAN_RELEASE = "trixie"
 DEBIAN_VERSION = "13"
 DEBIAN_IMAGE = f"debian-{DEBIAN_VERSION}-generic-arm64.qcow2"
-# Where a mirror repository may keep the releases: a remote of https://cloud.debian.org/images/cloud/
-# has them at its top, a remote of https://cloud.debian.org/ under images/cloud/.
-DEBIAN_LAYOUTS = ("", "images/cloud/")
+# Debian's own listing of the release's builds, one dated folder each (20261123-2671/).
+DEBIAN_CLOUD = "https://cloud.debian.org/images/cloud"
+DEBIAN_BUILD = re.compile(r"^\d{8}-\d{1,6}$")
+# Where a mirror repository keeps the release's folders, by what the remote points at:
+# https://cloud.debian.org/images/cloud/, https://cloud.debian.org/, or .../cloud/trixie/ itself.
+DEBIAN_LAYOUTS = (f"{DEBIAN_RELEASE}/", f"images/cloud/{DEBIAN_RELEASE}/", "")
+
+
+def debian_image_file(build: str) -> str:
+    """The image's file name in a dated folder: debian-13-generic-arm64-20261123-2671.qcow2."""
+    return f"debian-{DEBIAN_VERSION}-generic-arm64-{build}.qcow2"
+
+
+def _build_key(build: str) -> tuple[int, int]:
+    date, serial = build.split("-")
+    return int(date), int(serial)
+
+
+def _builds_in_listing(html: str) -> set[str]:
+    """Dated build folders in an HTML folder listing (Debian's or Artifactory's)."""
+    found = {match.rstrip("/") for match in re.findall(r'href="(?:\./)?(\d{8}-\d{1,6})/?"', html)}
+    return {build for build in found if DEBIAN_BUILD.match(build)}
 
 
 class Artifactory(BaseModel):
@@ -97,45 +116,115 @@ class ImageInfo(BaseModel):
 
 
 class DebianMirror(BaseModel):
-    """Debian's cloud images through an Artifactory repository that mirrors cloud.debian.org."""
+    """Debian's cloud image through an Artifactory repository that mirrors cloud.debian.org."""
 
     repository: str
-    # The release's "latest" folder, as the build script's MIRROR: SHA512SUMS and the image are in it.
+    # The build's dated folder, as the build script's MIRROR: SHA512SUMS and the image are in it.
     url: str
+    build: str
+    image: str
+    # Artifactory had the image already; otherwise it fetches it from Debian on the first download.
+    cached: bool = False
+    # Where the newest build was learnt from: "Debian", or "Artifactory" when Debian is out of reach.
+    newest_from: str = "Debian"
 
 
 class ImageError(Exception):
     pass
 
 
-async def debian_mirror(repository: Artifactory, token: str, timeout: float = 20.0) -> DebianMirror:
-    """Find Debian's release folder in the mirror repository.
+async def debian_builds(client: httpx.AsyncClient, debian_url: str | None = None) -> set[str]:
+    """The release's builds, from Debian's own listing; empty if Debian is out of reach."""
+    debian_url = debian_url or DEBIAN_CLOUD
+    try:
+        response = await client.get(f"{debian_url}/{DEBIAN_RELEASE}/")
+    except httpx.HTTPError:
+        return set()
+    return _builds_in_listing(response.text) if response.status_code == 200 else set()
 
-    The checksums come through the mirror from Debian (SHA512SUMS), as they do
-    from Debian directly; the build checks the image against them.
+
+async def _mirror_builds(
+    client: httpx.AsyncClient, repository: Artifactory, auth: tuple[str, str], layout: str
+) -> tuple[set[str], set[str]]:
+    """(builds Artifactory has cached, builds its remote listing shows) under one layout."""
+    name = repository.debian_mirror_repo
+    cached: set[str] = set()
+    storage = await client.get(f"{repository.url}/api/storage/{name}/{layout}".rstrip("/"), auth=auth)
+    if storage.status_code in (401, 403):
+        raise ImageError("Artifactory refused the username or token for the base image.")
+    if storage.status_code == 200:
+        try:
+            children = storage.json().get("children") or []
+        except ValueError:
+            children = []
+        cached = {str(c.get("uri", "")).strip("/") for c in children if isinstance(c, dict) and c.get("folder")}
+        cached = {build for build in cached if DEBIAN_BUILD.match(build)}
+    listing = await client.get(f"{repository.url}/{name}/{layout}", auth=auth)
+    listed = _builds_in_listing(listing.text) if listing.status_code == 200 else set()
+    return cached, listed
+
+
+async def debian_mirror(
+    repository: Artifactory, token: str, timeout: float = 20.0, debian_url: str | None = None
+) -> DebianMirror:
+    """Choose the Debian build to use and where the mirror repository serves it.
+
+    1. The newest build, from Debian's own listing (from the Mac directly).
+    2. What Artifactory has: its cache (storage API) and its remote's listing.
+    3. The newest build is asked for through the mirror; a remote repository that
+       does not have it yet fetches it from Debian. When Debian is out of reach,
+       the newest build Artifactory knows is used.
+
+    A dated folder never changes, unlike "latest", which some remote repositories
+    cannot follow. The checksums come through the mirror from Debian (SHA512SUMS);
+    the build checks the image against them.
     """
     name = repository.debian_mirror_repo
     if not name:
         raise ImageError("No Debian mirror repository is set.")
+    debian_url = debian_url or DEBIAN_CLOUD
     auth = (repository.username, token)
     tried: list[str] = []
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            public = await debian_builds(client, debian_url)
+            known: dict[str, tuple[set[str], set[str]]] = {}
             for layout in DEBIAN_LAYOUTS:
-                folder = f"{repository.url}/{name}/{layout}{DEBIAN_RELEASE}/latest"
-                response = await client.get(f"{folder}/SHA512SUMS", auth=auth)
-                if response.status_code in (401, 403):
-                    raise ImageError("Artifactory refused the username or token for the base image.")
-                if response.status_code == 200 and any(
-                    line.split()[1:2] == [DEBIAN_IMAGE] for line in response.text.splitlines()
-                ):
-                    return DebianMirror(repository=name, url=folder)
-                tried.append(f"{name}/{layout}{DEBIAN_RELEASE}/latest/SHA512SUMS (HTTP {response.status_code})")
+                known[layout] = await _mirror_builds(client, repository, auth, layout)
+            in_mirror = set().union(*(cached | listed for cached, listed in known.values()))
+            candidates = sorted(public or in_mirror, key=_build_key, reverse=True)
+            # The newest first; then what Artifactory already has, should the newest not come through.
+            cached_all = set().union(*(cached for cached, _ in known.values()))
+            candidates += sorted(cached_all - set(candidates[:1]), key=_build_key, reverse=True)
+            if not candidates:
+                raise ImageError(
+                    f"No Debian {DEBIAN_VERSION} builds found: Debian's list ({debian_url}/{DEBIAN_RELEASE}/) "
+                    f"could not be read from this Mac, and '{name}' lists none and has none cached. "
+                    "It should be a remote of https://cloud.debian.org/images/cloud/."
+                )
+            # Layouts where builds were seen go first.
+            layouts = sorted(DEBIAN_LAYOUTS, key=lambda lay: not (known[lay][0] | known[lay][1]))
+            for build in dict.fromkeys(candidates[:4]):
+                image = debian_image_file(build)
+                for layout in layouts:
+                    folder = f"{repository.url}/{name}/{layout}{build}"
+                    response = await client.get(f"{folder}/SHA512SUMS", auth=auth)
+                    if response.status_code in (401, 403):
+                        raise ImageError("Artifactory refused the username or token for the base image.")
+                    if response.status_code == 200 and any(
+                        line.split()[1:2] == [image] for line in response.text.splitlines()
+                    ):
+                        return DebianMirror(
+                            repository=name, url=folder, build=build, image=image,
+                            cached=build in known[layout][0],
+                            newest_from="Debian" if public else "Artifactory",
+                        )
+                    tried.append(f"{name}/{layout}{build}/SHA512SUMS (HTTP {response.status_code})")
     except httpx.HTTPError as exc:
         raise ImageError(f"Artifactory could not be reached: {type(exc).__name__}: {exc}"[:300]) from exc
     raise ImageError(
-        f"The repository '{name}' does not serve Debian's cloud images ({DEBIAN_IMAGE}): tried "
-        + " and ".join(tried) + ". It should be a remote of https://cloud.debian.org/images/cloud/."
+        f"The repository '{name}' does not serve Debian's cloud images: tried "
+        + ", ".join(tried[:6]) + ". It should be a remote of https://cloud.debian.org/images/cloud/."
     )
 
 
@@ -263,8 +352,10 @@ async def check(repository: Artifactory, token: str, timeout: float = 15.0) -> C
                 mirror = await debian_mirror(repository, token, timeout)
             except ImageError as exc:
                 return CheckResult(ok=False, detail=f"{detail} But the base image: {exc}")
-            return CheckResult(ok=True, detail=f"{detail} Debian {DEBIAN_VERSION}'s cloud image comes "
-                                               f"through '{mirror.repository}'.")
+            where = "Artifactory has it already" if mirror.cached else "Artifactory fetches it from Debian on the next build"
+            newest = "the newest at Debian" if mirror.newest_from == "Debian" else "the newest Artifactory knows"
+            return CheckResult(ok=True, detail=f"{detail} Base image: Debian {DEBIAN_VERSION} build {mirror.build} "
+                                               f"({newest}) through '{mirror.repository}'; {where}.")
         if repository.base_image:
             try:
                 image = await image_info(repository, token, timeout)
