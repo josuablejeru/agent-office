@@ -14,9 +14,18 @@ APP="${1:?usage: scripts/notarize.sh path/to/Agent Office.app}"
 echo "==> Notarizing (this takes a few minutes)"
 UPLOAD="$(mktemp -d)/upload.zip"
 ditto -c -k --keepParent "$APP" "$UPLOAD"
-xcrun notarytool submit "$UPLOAD" --wait \
-  --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+AUTH=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
+RESULT="$(xcrun notarytool submit "$UPLOAD" --wait --output-format json "${AUTH[@]}")" || true
 rm -f "$UPLOAD"
+echo "$RESULT"
+ID="$(printf '%s' "$RESULT" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)"
+STATUS="$(printf '%s' "$RESULT" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)"
+if [ "$STATUS" != "Accepted" ]; then
+  # Apple's reasons: which files, and what is wrong with each.
+  [ -n "$ID" ] && xcrun notarytool log "$ID" "${AUTH[@]}" || true
+  echo "error: Apple did not accept the app (status: ${STATUS:-unknown})" >&2
+  exit 1
+fi
 # Fetching the ticket from Apple occasionally drops the connection: try again.
 for attempt in 1 2 3 4 5; do
   xcrun stapler staple "$APP" && break
